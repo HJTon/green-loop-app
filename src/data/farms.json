@@ -1,0 +1,20 @@
+[
+  {
+    "id": "1",
+    "farm_name": "Eudaimonia",
+    "contact_name": "",
+    "contact_phone": "",
+    "address": "274 Korito Road",
+    "delivery_notes": "",
+    "active": true
+  },
+  {
+    "id": "2",
+    "farm_name": "Chauncy's Place",
+    "contact_name": "",
+    "contact_phone": "",
+    "address": "TBD",
+    "delivery_notes": "",
+    "active": true
+  }
+]
