@@ -1,36 +1,34 @@
-import { createWorker } from 'tesseract.js';
-
 export interface OcrResult {
   text: string;
   confidence: number;
   suggestedSerial: string;
 }
 
-// Recognize serial number from image
+// Recognize serial number from image using Google Cloud Vision API
 export async function recognizeSerialNumber(imageData: string): Promise<OcrResult> {
-  const worker = await createWorker('eng');
-
   try {
-    // Configure for digit recognition
-    await worker.setParameters({
-      tessedit_char_whitelist: '0123456789',
+    const response = await fetch('/.netlify/functions/ocr-vision', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ imageData }),
     });
 
-    const { data } = await worker.recognize(imageData);
+    if (!response.ok) {
+      throw new Error(`OCR request failed: ${response.status}`);
+    }
 
-    // Clean result - expect numeric format like "000032344"
-    const cleaned = data.text.replace(/[^0-9]/g, '');
-
-    // Pad with leading zeros if less than 9 digits
-    const suggestedSerial = cleaned.padStart(9, '0').slice(-9);
+    const result = await response.json();
 
     return {
-      text: data.text,
-      confidence: data.confidence / 100,
-      suggestedSerial,
+      text: result.text || '',
+      confidence: result.confidence || 0,
+      suggestedSerial: result.suggestedSerial || '',
     };
-  } finally {
-    await worker.terminate();
+  } catch (error) {
+    console.error('OCR error:', error);
+    throw error;
   }
 }
 
@@ -46,25 +44,24 @@ export function validateSerialNumber(serial: string): {
     return { valid: false, error: 'Serial number is required' };
   }
 
-  // Check if numeric only
-  if (!/^\d+$/.test(cleaned)) {
-    return { valid: false, error: 'Serial number should contain only digits' };
+  // Check if alphanumeric only
+  if (!/^[A-Za-z0-9]+$/.test(cleaned)) {
+    return { valid: false, error: 'Serial number should contain only letters and digits' };
   }
 
-  // Check reasonable length (6-12 digits)
-  if (cleaned.length < 6) {
+  // Check reasonable length (3-15 characters)
+  if (cleaned.length < 3) {
     return { valid: false, error: 'Serial number seems too short' };
   }
 
-  if (cleaned.length > 12) {
+  if (cleaned.length > 15) {
     return { valid: false, error: 'Serial number seems too long' };
   }
 
   return { valid: true };
 }
 
-// Format serial number for display (add leading zeros if needed)
+// Format serial number for display
 export function formatSerialNumber(serial: string): string {
-  const cleaned = serial.replace(/[^0-9]/g, '');
-  return cleaned.padStart(9, '0');
+  return serial.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
 }

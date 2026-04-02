@@ -10,6 +10,14 @@ interface DatePickerModalProps {
   availableDates?: Date[];
 }
 
+// Format date to YYYY-MM-DD in local timezone
+function formatDateLocal(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export function DatePickerModal({
   isOpen,
   onClose,
@@ -23,7 +31,7 @@ export function DatePickerModal({
 
   // Convert available dates to string set for quick lookup
   const availableDateStrings = useMemo(() => {
-    return new Set(availableDates.map(d => d.toISOString().split('T')[0]));
+    return new Set(availableDates.map(d => formatDateLocal(d)));
   }, [availableDates]);
 
   if (!isOpen) return null;
@@ -52,20 +60,20 @@ export function DatePickerModal({
 
   const handleDateClick = (day: number) => {
     const date = new Date(viewYear, viewMonth, day);
-    const dateStr = date.toISOString().split('T')[0];
+    const dateStr = formatDateLocal(date);
     onSelectDate(dateStr);
     onClose();
   };
 
   const handleTodayClick = () => {
-    const todayStr = today.toISOString().split('T')[0];
+    const todayStr = formatDateLocal(today);
     onSelectDate(todayStr);
     onClose();
   };
 
   const renderDays = () => {
     const days = [];
-    const todayStr = today.toISOString().split('T')[0];
+    const todayStr = formatDateLocal(today);
 
     // Empty cells for days before the first of the month
     for (let i = 0; i < firstDayOfMonth; i++) {
@@ -75,7 +83,7 @@ export function DatePickerModal({
     // Days of the month
     for (let day = 1; day <= daysInMonth; day++) {
       const date = new Date(viewYear, viewMonth, day);
-      const dateStr = date.toISOString().split('T')[0];
+      const dateStr = formatDateLocal(date);
       const isToday = dateStr === todayStr;
       const isSelected = dateStr === selectedDate;
       const hasPickups = availableDateStrings.has(dateStr);

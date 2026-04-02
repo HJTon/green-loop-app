@@ -1,4 +1,5 @@
 import type { PickupRecord, Client, Collector, BinFullness, DropOffRecord, Farm } from '@/types';
+import { getCurrentDate } from './storage';
 
 function formatFullness(fullness: BinFullness[]): string {
   return fullness.join(',');
@@ -79,7 +80,7 @@ export function exportTodayData(
   dropOff?: DropOffRecord | null,
   farms?: Farm[]
 ): void {
-  const today = new Date().toISOString().split('T')[0];
+  const today = getCurrentDate();
   const todayPickups = pickups.filter(p => p.date === today);
 
   if (todayPickups.length === 0) {

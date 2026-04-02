@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { MapPin, Trash2, Plus, Minus, Info } from 'lucide-react';
+import { MapPin, Trash2, Plus, Minus, Info, Check } from 'lucide-react';
 import { Header } from '@/components/Header';
 import { Button } from '@/components/Button';
 import { FullnessSelector } from '@/components/FullnessSelector';
 import { PhotoSection } from '@/components/PhotoSection';
 import { ReportSection } from '@/components/ReportSection';
+import { SerialNumberModal } from '@/components/consolidation/SerialNumberModal';
 import { useApp } from '@/contexts/AppContext';
 import { generateId, getCurrentDate, getCurrentTime, getPickupByClientAndDate } from '@/utils/storage';
+import { sendReportEmail } from '@/services/emailService';
 import type { BinFullness, PickupReport, PickupRecord } from '@/types';
 
 export function PickupPage() {
@@ -32,10 +34,15 @@ export function PickupPage() {
   // Form state
   const [binsCollected, setBinsCollected] = useState(client?.expected_quantity || 1);
   const [binFullness, setBinFullness] = useState<(BinFullness | null)[]>([]);
+  const [binSerialNumbers, setBinSerialNumbers] = useState<string[]>([]);
   const [notes, setNotes] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
   const [report, setReport] = useState<PickupReport | null>(null);
   const [existingPickupId, setExistingPickupId] = useState<string | null>(null);
+
+  // Serial number modal state (for bins only)
+  const [serialModalIndex, setSerialModalIndex] = useState<number | null>(null);
+  const isBinsCollection = client?.collection_type === 'bins';
 
   // Load existing pickup if editing
   useEffect(() => {
@@ -45,6 +52,7 @@ export function PickupPage() {
         setExistingPickupId(existing.id);
         setBinsCollected(existing.bins_collected);
         setBinFullness(existing.bin_fullness);
+        setBinSerialNumbers(existing.bin_serial_numbers || []);
         setNotes(existing.notes);
         setPhotos(existing.photos);
         setReport(existing.report);
@@ -52,12 +60,19 @@ export function PickupPage() {
     }
   }, [clientId, pickups]);
 
-  // Initialize fullness array when bins count changes
+  // Initialize fullness and serial number arrays when bins count changes
   useEffect(() => {
     setBinFullness(prev => {
       const newArray = [...prev];
       while (newArray.length < binsCollected) {
         newArray.push(null);
+      }
+      return newArray.slice(0, binsCollected);
+    });
+    setBinSerialNumbers(prev => {
+      const newArray = [...prev];
+      while (newArray.length < binsCollected) {
+        newArray.push('');
       }
       return newArray.slice(0, binsCollected);
     });
@@ -85,6 +100,28 @@ export function PickupPage() {
       newArray[index] = value;
       return newArray;
     });
+
+    // For bins (not buckets), show serial number modal immediately
+    if (isBinsCollection && !binSerialNumbers[index]) {
+      setSerialModalIndex(index);
+    }
+  };
+
+  const handleSerialNumberChange = (index: number, value: string) => {
+    // Allow letters and digits, convert to uppercase
+    const cleaned = value.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    setBinSerialNumbers(prev => {
+      const newArray = [...prev];
+      newArray[index] = cleaned;
+      return newArray;
+    });
+  };
+
+  const handleSerialModalSubmit = (serialNumber: string) => {
+    if (serialModalIndex !== null) {
+      handleSerialNumberChange(serialModalIndex, serialNumber);
+      setSerialModalIndex(null);
+    }
   };
 
   const adjustBinCount = (delta: number) => {
@@ -92,11 +129,17 @@ export function PickupPage() {
     setBinsCollected(newCount);
   };
 
-  const isFormValid = binFullness.every(f => f !== null);
+  // Validation: all items need fullness, only bins need serial numbers
+  const isFormValid = binFullness.every(f => f !== null) &&
+                      (!isBinsCollection || binSerialNumbers.every(s => s.length >= 3));
 
   const handleComplete = () => {
-    if (!isFormValid) {
-      alert('Please select fullness for all bins');
+    if (!binFullness.every(f => f !== null)) {
+      alert(`Please select fullness for all ${unitName}`);
+      return;
+    }
+    if (isBinsCollection && !binSerialNumbers.every(s => s.length >= 3)) {
+      alert('Please enter serial number for all bins');
       return;
     }
 
@@ -108,6 +151,7 @@ export function PickupPage() {
       collector_id: collector.id,
       bins_collected: binsCollected,
       bin_fullness: binFullness as BinFullness[],
+      bin_serial_numbers: binSerialNumbers,
       notes,
       photos,
       report: report?.issue || report?.action ? report : null,
@@ -124,6 +168,16 @@ export function PickupPage() {
     // Queue the bin count for write-back to Google Sheets
     recordBinCount(client.id, binsCollected);
 
+    // Send email notification if there's a report
+    if (pickup.report && pickup.report.issue) {
+      sendReportEmail({
+        businessName: client.business_name,
+        collectorName: collector.name,
+        reportType: 'pickup',
+        report: pickup.report,
+      });
+    }
+
     navigate(`/confirmation/${client.id}`);
   };
 
@@ -136,6 +190,7 @@ export function PickupPage() {
       collector_id: collector.id,
       bins_collected: 0,
       bin_fullness: [],
+      bin_serial_numbers: [],
       notes: notes || 'Skipped',
       photos: [],
       report: report?.issue || report?.action ? report : null,
@@ -147,6 +202,16 @@ export function PickupPage() {
 
     // Queue zero for write-back (skipped)
     recordBinCount(client.id, 0);
+
+    // Send email notification if there's a report
+    if (pickup.report && pickup.report.issue) {
+      sendReportEmail({
+        businessName: client.business_name,
+        collectorName: collector.name,
+        reportType: 'pickup',
+        report: pickup.report,
+      });
+    }
 
     navigate('/route');
   };
@@ -251,19 +316,53 @@ export function PickupPage() {
           </div>
         </div>
 
-        {/* Fullness Selectors */}
-        <div className="space-y-3">
+        {/* Fullness and Serial Number for each bin */}
+        <div className="space-y-4">
           <label className="block text-sm font-medium text-gray-700">
-            {unitNameSingular.charAt(0).toUpperCase() + unitNameSingular.slice(1)} fullness
+            {unitNameSingular.charAt(0).toUpperCase() + unitNameSingular.slice(1)} details
           </label>
           {Array.from({ length: binsCollected }).map((_, index) => (
-            <FullnessSelector
-              key={index}
-              index={index}
-              value={binFullness[index] || null}
-              onChange={value => handleFullnessChange(index, value)}
-              collectionType={client.collection_type}
-            />
+            <div key={index} className="bg-white rounded-lg border border-gray-200 p-3 space-y-3">
+              <div className="text-sm font-medium text-gray-600">
+                {unitNameSingular.charAt(0).toUpperCase() + unitNameSingular.slice(1)} {index + 1}
+              </div>
+              <FullnessSelector
+                index={index}
+                value={binFullness[index] || null}
+                onChange={value => handleFullnessChange(index, value)}
+                collectionType={client.collection_type}
+              />
+              {/* Serial number display - only for bins, shows after it's been entered */}
+              {isBinsCollection && binFullness[index] && binSerialNumbers[index] && (
+                <div className="pt-2 border-t border-gray-100">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Check size={16} className="text-green-600" />
+                      <span className="text-sm font-mono font-medium text-gray-900">
+                        #{binSerialNumbers[index]}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => setSerialModalIndex(index)}
+                      className="text-xs text-green-primary hover:underline"
+                    >
+                      Change
+                    </button>
+                  </div>
+                </div>
+              )}
+              {/* Prompt to add serial - only for bins, when fullness selected but no serial yet */}
+              {isBinsCollection && binFullness[index] && !binSerialNumbers[index] && (
+                <div className="pt-2 border-t border-gray-100">
+                  <button
+                    onClick={() => setSerialModalIndex(index)}
+                    className="w-full py-2 text-sm text-green-primary border border-green-primary rounded-lg hover:bg-green-50 transition-colors"
+                  >
+                    + Add Serial Number
+                  </button>
+                </div>
+              )}
+            </div>
           ))}
         </div>
 
@@ -305,6 +404,13 @@ export function PickupPage() {
 
       {/* Bottom padding */}
       <div className="h-8" />
+
+      {/* Serial Number Modal - for bins only */}
+      <SerialNumberModal
+        isOpen={serialModalIndex !== null}
+        onClose={() => setSerialModalIndex(null)}
+        onSubmit={handleSerialModalSubmit}
+      />
     </div>
   );
 }

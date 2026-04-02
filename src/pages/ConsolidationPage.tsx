@@ -46,6 +46,7 @@ export function ConsolidationPage() {
   const [showSerialModal, setShowSerialModal] = useState(false);
   const [activeTile, setActiveTile] = useState<PickupTile | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [selectedTileId, setSelectedTileId] = useState<string | null>(null);
 
   const farm = route?.destination_farm_id ? getFarmById(route.destination_farm_id) : undefined;
 
@@ -140,9 +141,36 @@ export function ConsolidationPage() {
     addToast('success', `Added bin #${serialNumber}`);
   };
 
+  const handleTileSelect = (tileId: string) => {
+    setSelectedTileId(prev => (prev === tileId ? null : tileId));
+  };
+
+  const handleBinTap = (binId: string) => {
+    if (!selectedTileId || !session) return;
+    const tile = session.pickupTiles.find(t => t.id === selectedTileId);
+    if (!tile || tile.isAssigned) {
+      setSelectedTileId(null);
+      return;
+    }
+    setSession(prev => {
+      if (!prev) return prev;
+      const updatedBins = prev.maturingBins.map(bin => {
+        if (bin.id === binId) return addPickupToMaturingBin(bin, tile);
+        return bin;
+      });
+      const updatedTiles = prev.pickupTiles.map(t => {
+        if (t.id === selectedTileId) return { ...t, isAssigned: true };
+        return t;
+      });
+      return { ...prev, maturingBins: updatedBins, pickupTiles: updatedTiles };
+    });
+    setSelectedTileId(null);
+  };
+
   const handleDragStart = (event: DragStartEvent) => {
     const tile = event.active.data.current?.tile as PickupTile | undefined;
     setActiveTile(tile || null);
+    setSelectedTileId(null); // clear tap selection when drag starts
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -279,16 +307,21 @@ export function ConsolidationPage() {
           <div className="lg:flex lg:gap-6">
             {/* Left side: Unassigned Pickups */}
             <div className="lg:w-1/2 mb-6 lg:mb-0">
-              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                Unassigned Pickups ({unassignedTiles.length})
-              </h3>
+              <div className="flex items-baseline justify-between mb-3">
+                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
+                  Unassigned Pickups ({unassignedTiles.length})
+                </h3>
+                {unassignedTiles.length > 0 && (
+                  <span className="text-xs text-gray-400">Tap to select · drag to place</span>
+                )}
+              </div>
 
               {!hasPickups ? (
                 <div className="bg-gray-50 border-2 border-gray-200 rounded-xl p-6 text-center">
                   <Truck size={32} className="text-gray-400 mx-auto mb-2" />
                   <p className="text-gray-600 font-medium">No pickups completed yet</p>
                   <p className="text-sm text-gray-500 mt-1">
-                    Complete pickups on the route, then drag them into bins here
+                    Complete pickups on the route, then assign them to bins here
                   </p>
                 </div>
               ) : unassignedTiles.length === 0 ? (
@@ -299,7 +332,12 @@ export function ConsolidationPage() {
               ) : (
                 <div className="space-y-2">
                   {unassignedTiles.map(tile => (
-                    <DraggablePickupTile key={tile.id} tile={tile} />
+                    <DraggablePickupTile
+                      key={tile.id}
+                      tile={tile}
+                      isSelected={selectedTileId === tile.id}
+                      onSelect={() => handleTileSelect(tile.id)}
+                    />
                   ))}
                 </div>
               )}
@@ -313,12 +351,18 @@ export function ConsolidationPage() {
 
               <div className="space-y-3">
                 {session.maturingBins.map(bin => (
-                  <MaturingBinDropZone key={bin.id} binId={bin.id}>
+                  <MaturingBinDropZone
+                    key={bin.id}
+                    binId={bin.id}
+                    hasSelectedTile={selectedTileId !== null}
+                    onBinTap={() => handleBinTap(bin.id)}
+                  >
                     <MaturingBinCard
                       bin={bin}
                       onRemoveContent={pickupTileId =>
                         handleRemoveFromBin(bin.id, pickupTileId)
                       }
+                      hasSelectedTile={selectedTileId !== null}
                     />
                   </MaturingBinDropZone>
                 ))}

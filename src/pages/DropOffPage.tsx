@@ -22,6 +22,7 @@ import { ConsolidationProgress } from '@/components/consolidation/ConsolidationP
 import { SerialNumberModal } from '@/components/consolidation/SerialNumberModal';
 import { useApp } from '@/contexts/AppContext';
 import { getFarmById } from '@/utils/data';
+import { sendReportEmail } from '@/services/emailService';
 import {
   generateId,
   getCurrentDate,
@@ -200,7 +201,34 @@ export function DropOffPage() {
         return;
       }
 
-      // Store the tile and show serial modal
+      // Use the tile's serial number from pickup (captured at pickup time)
+      if (tile.serialNumber) {
+        // Create bin directly with the serial number from pickup
+        const newBin = createMaturingBin(tile.serialNumber, collector.id, farm.id);
+        const binWithContent = addPickupToMaturingBin(newBin, tile);
+
+        setSession(prev => {
+          if (!prev) return prev;
+
+          const updatedTiles = prev.pickupTiles.map(t => {
+            if (t.id === tile.id) {
+              return { ...t, isAssigned: true };
+            }
+            return t;
+          });
+
+          return {
+            ...prev,
+            maturingBins: [...prev.maturingBins, binWithContent],
+            pickupTiles: updatedTiles,
+          };
+        });
+
+        addToast('success', `Created maturing bin #${tile.serialNumber}`);
+        return;
+      }
+
+      // Fallback: if no serial number, show modal (shouldn't happen with new flow)
       setPendingTileForNewBin(tile);
       setShowSerialModal(true);
       return;
@@ -366,6 +394,17 @@ export function DropOffPage() {
       };
 
       completeDropOff(newDropOff);
+
+      // Send email notification if there's a report
+      if (newDropOff.report && newDropOff.report.issue) {
+        sendReportEmail({
+          businessName: farm.farm_name,
+          collectorName: collector.name,
+          reportType: 'dropoff',
+          report: newDropOff.report,
+        });
+      }
+
       addToast('success', `Exported ${session.maturingBins.length} bin(s) to maturing sheet`);
       navigate('/summary');
     } catch (error) {
@@ -438,7 +477,7 @@ export function DropOffPage() {
           <div className="mb-4 flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
             <Info size={16} className="text-blue-600 mt-0.5 shrink-0" />
             <p className="text-sm text-blue-800">
-              Drag a bin to the maturing zone to scan its serial number. Then add more bins/buckets to combine contents.
+              Drag a bin to the maturing zone to start. Add more bins/buckets to combine contents - the first bin's serial number will be used.
             </p>
           </div>
 
@@ -510,7 +549,7 @@ export function DropOffPage() {
               <AlertCircle size={18} className="text-amber-600 mt-0.5 shrink-0" />
               <p className="text-sm text-amber-800">
                 {session.maturingBins.length === 0
-                  ? 'Drag a bin to the maturing zone to scan its serial number and start consolidating.'
+                  ? 'Drag a bin to the maturing zone to start consolidating.'
                   : 'Assign all collected bins/buckets to maturing bins to complete drop-off.'}
               </p>
             </div>

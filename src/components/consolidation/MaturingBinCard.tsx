@@ -7,9 +7,10 @@ interface MaturingBinCardProps {
   bin: MaturingBin;
   onRemoveContent?: (pickupTileId: string) => void;
   isDropTarget?: boolean;
+  hasSelectedTile?: boolean;
 }
 
-export function MaturingBinCard({ bin, onRemoveContent, isDropTarget }: MaturingBinCardProps) {
+export function MaturingBinCard({ bin, onRemoveContent, isDropTarget, hasSelectedTile }: MaturingBinCardProps) {
   const ready = isBinReady(bin);
 
   const totalItems = bin.contents.reduce((sum, c) => sum + c.binsCount, 0);
@@ -47,11 +48,20 @@ export function MaturingBinCard({ bin, onRemoveContent, isDropTarget }: Maturing
       {/* Contents */}
       <div className="p-3 min-h-[80px]">
         {bin.contents.length === 0 ? (
-          <div className="flex items-center justify-center h-16 text-gray-400 text-sm border-2 border-dashed border-gray-200 rounded-lg">
-            Drag pickups here
+          <div className={`flex items-center justify-center h-16 text-sm border-2 border-dashed rounded-lg transition-colors ${
+            hasSelectedTile
+              ? 'border-green-primary text-green-700 bg-green-50'
+              : 'border-gray-200 text-gray-400'
+          }`}>
+            {hasSelectedTile ? 'Tap to assign here' : 'Select a pickup or drag it here'}
           </div>
         ) : (
           <div className="space-y-2">
+            {hasSelectedTile && (
+              <div className="text-xs text-center text-green-700 font-medium py-1 bg-green-50 rounded-lg border border-green-200">
+                Tap bin to add here
+              </div>
+            )}
             {bin.contents.map(content => {
               const tile: PickupTile = {
                 id: content.pickupTileId,
@@ -61,6 +71,7 @@ export function MaturingBinCard({ bin, onRemoveContent, isDropTarget }: Maturing
                 collectionType: content.collectionType,
                 fullness: [],
                 averageFullness: content.averageFullness,
+                serialNumber: '', // Not shown for contents - bin already has the serial
                 isAssigned: true,
               };
 

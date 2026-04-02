@@ -1,211 +1,270 @@
 # Green Loop Collector App
 
-A mobile-first web application for Green Loop waste collection services. Collectors use this app to manage their daily routes, log pickups, and record drop-offs at destination farms.
+A mobile-first PWA for organic waste collection teams to manage daily routes, record pickups, track bin consolidation, and report drop-offs at destination farms. Built for [Green Loop](https://greenloop.co.nz) — a New Zealand organic waste collection service.
 
-## Features (Phase 1 - Complete)
+**Live app:** https://greenloop.netlify.app
 
-### Authentication
-- PIN code login for collectors
-- Session persistence between app visits
-- Multiple user roles: collector, admin, accounts
+---
 
-### Route Management
-- View daily route with all stops
-- **Drag-and-drop reordering** of stops (useful when route needs adjusting)
-- Progress tracking (X of Y stops completed)
-- Visual status indicators (pending, completed, skipped)
-- Starting location display
+## What it does
 
-### Pickup Recording
-- Business name, address, and delivery notes displayed
-- Configurable bin/bucket count with quick-select buttons
-- **Fullness tracking** for each bin (1/4, 1/2, 3/4, Full)
-- Optional notes field
-- **Photo attachments** (placeholder images for now)
-- Skip functionality for unavailable stops
+Collectors use the app in the field on their phones:
 
-### Reports to Accounts
-- Simplified single text field: "What happened and what action did you take?"
-- **Urgency toggle**: Normal or Urgent
-- Reports included in CSV export
+1. **Log in** with a 4-digit PIN
+2. **View today's route** — stops loaded live from Google Sheets
+3. **Record each pickup** — bin count, fullness level, serial numbers (with OCR scanning), notes
+4. **Consolidate waste** — drag pickups into maturing bins (120L capacity tracking, 21-day ready dates)
+5. **Record drop-off** at the destination farm
+6. **End of day** — export CSV summary, reset for tomorrow
 
-### Farm Drop-off
-- Destination farm displayed at end of route
-- Automatically navigates to drop-off after last pickup
-- Drop-off notes and reporting
-- Summary of total bins/buckets collected
+The app works offline — all data is saved locally and synced back to Google Sheets when connectivity returns.
 
-### Confirmation Flow
-- Success confirmation after each pickup
-- Shows **next stop name and address**
-- Edit capability for same-day pickups
-- Progress indicator
-
-### End of Day
-- Route completion summary with statistics
-- **CSV export** with all pickup and drop-off data
-- "Export & Start New Day" resets for next day
-
-### Data Display
-- Current date shown on login (NZ format)
-- Delivery notes highlighted in amber box
-- Mobile-optimized touch targets
+---
 
 ## Tech Stack
 
-- **Vite** + **React** + **TypeScript**
-- **Tailwind CSS** for styling
-- **React Router** for navigation
-- **@dnd-kit** for drag-and-drop
-- **Lucide React** for icons
-- **LocalStorage** for data persistence
+| Layer | Technology |
+|-------|-----------|
+| Framework | React 19 + TypeScript |
+| Build | Vite |
+| Routing | React Router v7 |
+| Styling | Tailwind CSS v4 |
+| Drag & Drop | @dnd-kit |
+| Icons | Lucide React |
+| State / Persistence | React Context + LocalStorage |
+| Serverless | Netlify Functions |
+| Schedule Data | Google Sheets API (service account) |
+| OCR | Google Cloud Vision API |
+| Email | Resend API |
+| Invoicing | Google Apps Script |
+
+---
 
 ## Project Structure
 
 ```
-src/
-├── components/         # Reusable UI components
-│   ├── Button.tsx
-│   ├── Header.tsx
-│   ├── PinPad.tsx
-│   ├── ProgressBar.tsx
-│   ├── StopCard.tsx
-│   ├── SortableStopCard.tsx
-│   ├── FullnessSelector.tsx
-│   ├── PhotoSection.tsx
-│   └── ReportSection.tsx
-├── contexts/
-│   └── AppContext.tsx  # Global state management
-├── data/               # JSON data files
-│   ├── clients.json    # Business clients
-│   ├── collectors.json # Team members with PINs
-│   ├── farms.json      # Destination farms
-│   └── route.json      # Daily route configuration
-├── pages/
-│   ├── LoginPage.tsx
-│   ├── RouteListPage.tsx
-│   ├── PickupPage.tsx
-│   ├── ConfirmationPage.tsx
-│   ├── DropOffPage.tsx
-│   └── SummaryPage.tsx
-├── types/
-│   └── index.ts        # TypeScript interfaces
-└── utils/
-    ├── data.ts         # Data loading utilities
-    ├── storage.ts      # LocalStorage functions
-    └── export.ts       # CSV export functionality
+green-loop-app/
+├── src/
+│   ├── App.tsx                        # Router setup
+│   ├── main.tsx                       # Entry point
+│   ├── components/
+│   │   ├── Button.tsx
+│   │   ├── Header.tsx
+│   │   ├── PinPad.tsx
+│   │   ├── ProgressBar.tsx
+│   │   ├── StopCard.tsx / SortableStopCard.tsx
+│   │   ├── FullnessSelector.tsx
+│   │   ├── DatePickerModal.tsx
+│   │   ├── Toast.tsx
+│   │   └── consolidation/             # Bin consolidation UI
+│   │       ├── CameraCapture.tsx
+│   │       ├── SerialNumberModal.tsx
+│   │       ├── DraggablePickupTile.tsx
+│   │       ├── PickupTileCard.tsx
+│   │       ├── MaturingBinCard.tsx
+│   │       └── MaturingBinDropZone.tsx
+│   ├── contexts/
+│   │   └── AppContext.tsx              # Global state + offline sync
+│   ├── pages/
+│   │   ├── LoginPage.tsx
+│   │   ├── RouteListPage.tsx          # Drag-to-reorder stop list
+│   │   ├── PickupPage.tsx             # Record pickup details
+│   │   ├── ConfirmationPage.tsx
+│   │   ├── ConsolidationPage.tsx      # Assign pickups to maturing bins
+│   │   ├── DropOffPage.tsx            # Farm drop-off recording
+│   │   └── SummaryPage.tsx            # End-of-day stats + CSV export
+│   ├── services/
+│   │   ├── sheetDataService.ts        # Load route from Google Sheets
+│   │   ├── consolidationService.ts    # Bin capacity + fullness logic
+│   │   ├── ocrService.ts              # Serial number OCR
+│   │   └── emailService.ts            # Report email notifications
+│   ├── types/
+│   │   ├── index.ts
+│   │   └── sheet.ts
+│   └── utils/
+│       ├── storage.ts                 # LocalStorage helpers
+│       ├── csvParser.ts               # Parse Sheets CSV export
+│       ├── export.ts                  # Generate daily CSV
+│       └── data.ts                    # Load static collectors/farms JSON
+├── netlify/
+│   └── functions/
+│       ├── sheets-read.ts             # Read pickup schedule
+│       ├── sheets-write.ts            # Write bin counts after pickup
+│       ├── ocr-vision.ts              # Google Cloud Vision OCR
+│       ├── maturing-bins-write.ts     # Export consolidation to sheet
+│       ├── send-report-email.ts       # Email via Resend API
+│       └── drive-upload.ts            # Google Drive photo upload
+├── public/
+│   ├── logo.jpg
+│   ├── bin1.jpg, bin2.jpg, bin3.jpg   # Reference photos
+│   ├── logos/                         # Client logos
+│   └── data/
+│       └── schedule.csv               # Fallback dev data
+├── google-apps-script/
+│   └── InvoiceGenerator.gs            # Monthly invoice generation
+├── netlify.toml
+├── vite.config.ts
+└── package.json
 ```
 
-## Data Files
+---
 
-### clients.json
-Business clients with:
-- Contact details (name, phone, email)
-- Address and delivery notes
-- Collection type (bins/buckets)
-- Expected quantity
-- Collection frequency (Weekly/Fortnightly)
-- Pricing information
+## Pages & Routes
 
-### collectors.json
-Team members with:
-- Name and PIN code
-- Role (collector, admin, accounts)
-- Active status
+| Route | Page | Description |
+|-------|------|-------------|
+| `/` | LoginPage | 4-digit PIN authentication |
+| `/route` | RouteListPage | Today's stops, drag-to-reorder, date picker |
+| `/pickup/:clientId` | PickupPage | Record bins, fullness, serial numbers, notes |
+| `/confirmation/:clientId` | ConfirmationPage | Confirm pickup before continuing |
+| `/consolidation` | ConsolidationPage | Drag pickups into maturing bins |
+| `/dropoff` | DropOffPage | Farm drop-off notes and consolidation summary |
+| `/summary` | SummaryPage | Stats, CSV export, reset for new day |
 
-### farms.json
-Destination farms with:
-- Farm name and address
-- Contact details
-- Delivery notes
+---
 
-### route.json
-Daily route with:
-- Ordered stops (client references)
-- Start location
-- Destination farm
+## Data Flow
 
-## Running the App
+```
+Google Sheets (schedule)
+    └─▶ Netlify Function (sheets-read)
+            └─▶ sheetDataService.ts
+                    └─▶ AppContext (state)
+                            └─▶ Pages
+
+After pickup:
+    AppContext ──▶ LocalStorage (always)
+                └─▶ sheets-write (if online)
+                └─▶ pendingWrites queue (if offline)
+                        └─▶ auto-synced on reconnect
+```
+
+### Google Sheets format
+
+- **Row 1**: Date headers (e.g., `5 Feb 2026`, `12 Feb 2026`)
+- **Business rows**: Name, address, collection type, bin type, notes, etc.
+- **`Pick Up`** in a date column = scheduled stop for that day
+- **Bin count** written back below the `Pick Up` marker after each collection
+
+### Static data files
+
+- `public/data/collectors.json` — team members (name, PIN, role)
+- `public/data/farms.json` — destination farms (name, address, contact, notes)
+
+---
+
+## Installation & Development
 
 ```bash
 # Install dependencies
 npm install
 
-# Start development server
+# Start dev server (uses static fallback data)
 npm run dev
 
 # Build for production
 npm run build
 ```
 
-## Test Login PINs
+For local development with live Google Sheets data, you'll need the Netlify CLI:
 
-| Name     | PIN  | Role      |
-|----------|------|-----------|
-| Jermaine | 1234 | collector |
-| Mieke    | 5678 | collector |
-| Joe      | 9012 | admin     |
-| Sophie   | 3456 | accounts  |
-| Elric    | 4321 | collector |
-
-## Brand Colors
-
-- Primary Green: `#2D8B4E`
-- Dark Green/Teal: `#1B7B62`
-- Lime Accent: `#C5D93D`
+```bash
+npm install -g netlify-cli
+netlify login
+netlify link      # Link to your Netlify site
+netlify dev       # Starts local server with functions
+```
 
 ---
 
-## Future Development (Phase 2+)
+## Deployment
 
-### Notifications
-- **Normal reports**: Send Email only to accounts manager
-- **Urgent reports**: Send SMS + Email to accounts manager
-- Real-time push notifications
+Hosted on Netlify. To deploy:
 
-### Photo Capture
-- Actual camera integration (replace placeholder images)
-- Photo upload and storage
-- Image compression for mobile
+```bash
+netlify deploy --prod
+```
 
-### Cloud Sync
-- Connect to Supabase backend
-- Real-time data synchronization
-- Multi-device support
-- Historical data access
+This deploys both the static app and the Netlify Functions.
 
-### Route Optimization
-- GPS-based route suggestions
-- Traffic-aware ordering
-- Estimated arrival times
+---
 
-### Location Tracking
-- GPS check-in at each stop
-- Route visualization on map
-- Proof of service location
+## Environment Variables
 
-### Reporting Dashboard
-- Web dashboard for accounts/admin
-- Collection analytics
-- Client history
-- Invoice generation
+Set these in the Netlify dashboard under **Site Settings > Environment Variables**:
 
-### Additional Features
-- Paper towel pickup tracking
-- Client communication portal
-- Schedule management
-- Holiday/absence handling
+| Variable | Description |
+|----------|-------------|
+| `GOOGLE_SERVICE_ACCOUNT_KEY` | Google service account JSON (single line) |
+| `SPREADSHEET_ID` | Pickup schedule Google Sheet ID |
+| `MATURING_BINS_SPREADSHEET_ID` | Maturing bins tracking Sheet ID |
+| `RESEND_API_KEY` | Resend API key for email notifications |
+| `ACCOUNTS_EMAIL` | Report notification address (default: `accounts@greenloop.co.nz`) |
+
+The Google service account needs **Editor** access to the relevant spreadsheets.
+
+---
+
+## Invoice Generator (Google Apps Script)
+
+`google-apps-script/InvoiceGenerator.gs` generates monthly invoices from the pickup schedule sheet.
+
+**Setup:**
+1. Open the invoicing Google Sheet
+2. **Extensions > Apps Script** → paste the script → save
+3. Run `setupInvoiceSheet` once to create the Monthly Invoices tab
+4. Refresh — a **🌿 Green Loop Invoicing** menu appears
+
+**Menu options:**
+- **Generate Monthly Invoices…** — select a month and generate
+- **Export Last Month to Xero CSV** — run on the 1st of the month
+- **Refresh Current Month** — regenerate in-progress month
+
+**Xero export format:** Invoice date = 1st, Due date = 20th, GST (15%) included, auto-numbered `GL-YYYYMM-NNN`.
+
+---
+
+## Brand Colors
+
+| Name | Hex |
+|------|-----|
+| Primary Green | `#2D8B4E` |
+| Dark Green / Teal | `#1B7B62` |
+| Lime Accent | `#C5D93D` |
+
+---
+
+## Related Projects
+
+- **[compost-monitor](https://github.com/HJTon/compost-monitor)** — PWA for recording daily compost probe temperatures across multiple systems. Uses the same Google Sheets infrastructure.
 
 ---
 
 ## Version History
 
-### v1.0.0 (Current)
-- Initial release with full Phase 1 features
+### v2.3.0 (February 2026)
+- Email notifications for pickup and drop-off reports via Resend API
+- Urgency toggle (Normal / Urgent) with distinct email styling
+
+### v2.2.0 (February 2026)
+- Xero CSV export for monthly invoicing
+- Auto-generated invoice numbers (`GL-YYYYMM-NNN`)
+
+### v2.1.0 (February 2026)
+- NZ timezone fix for correct date display
+- Invoice Generator Google Apps Script with GST, free-pickup tracking, status management
+
+### v2.0.0 (February 2026)
+- Live Google Sheets integration (read + write)
+- OCR serial number scanning via Google Cloud Vision
+- Bin consolidation with drag-and-drop
+- Maturing bins tracking (21-day ready date)
+- Offline support with automatic sync
+- Calendar date picker for viewing other days
+
+### v1.0.0
 - PIN login, route management, pickup recording
 - Drop-off tracking with farm destinations
 - Drag-and-drop route reordering
-- CSV export with reset for new day
-- Delivery notes per client
+- CSV export with daily reset
 - Simplified single-field reporting
-- Real wheelie bin photos for placeholders

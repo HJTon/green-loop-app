@@ -37,8 +37,8 @@ export function SerialNumberModal({ isOpen, onClose, onSubmit }: SerialNumberMod
   };
 
   const handleManualChange = (value: string) => {
-    // Only allow digits
-    const cleaned = value.replace(/[^0-9]/g, '');
+    // Allow letters and digits
+    const cleaned = value.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
     setSerialNumber(cleaned);
     setError(null);
   };
@@ -69,7 +69,7 @@ export function SerialNumberModal({ isOpen, onClose, onSubmit }: SerialNumberMod
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
           <h2 className="text-lg font-semibold text-gray-900">
-            {mode === 'choose' && 'Select Maturing Bin'}
+            {mode === 'choose' && 'Enter Bin Serial Number'}
             {mode === 'camera' && 'Scan Serial Number'}
             {mode === 'manual' && 'Enter Serial Number'}
             {mode === 'processing' && 'Reading...'}
@@ -91,6 +91,8 @@ export function SerialNumberModal({ isOpen, onClose, onSubmit }: SerialNumberMod
               <p className="text-sm text-gray-600 mb-4">
                 How would you like to enter the bin serial number?
               </p>
+
+              {/* Scan option */}
               <button
                 onClick={() => setMode('camera')}
                 className="w-full flex items-center gap-3 p-4 bg-gray-50 rounded-lg border-2 border-gray-200 hover:border-green-primary hover:bg-green-50 transition-colors"
@@ -99,10 +101,11 @@ export function SerialNumberModal({ isOpen, onClose, onSubmit }: SerialNumberMod
                   <Camera size={20} className="text-white" />
                 </div>
                 <div className="text-left">
-                  <p className="font-medium text-gray-900">Scan with Camera</p>
-                  <p className="text-sm text-gray-500">Point camera at the serial number</p>
+                  <p className="font-medium text-gray-900">Scan Serial Number</p>
+                  <p className="text-sm text-gray-500">Point camera at the bin label</p>
                 </div>
               </button>
+
               <button
                 onClick={() => setMode('manual')}
                 className="w-full flex items-center gap-3 p-4 bg-gray-50 rounded-lg border-2 border-gray-200 hover:border-green-primary hover:bg-green-50 transition-colors"
@@ -143,11 +146,11 @@ export function SerialNumberModal({ isOpen, onClose, onSubmit }: SerialNumberMod
                 </label>
                 <input
                   type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
+                  inputMode="text"
+                  pattern="[A-Za-z0-9]*"
                   value={serialNumber}
                   onChange={e => handleManualChange(e.target.value)}
-                  placeholder="e.g., 000032344"
+                  placeholder="e.g., NPC0001465"
                   className="w-full px-4 py-3 text-lg font-mono border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-primary focus:border-transparent"
                   autoFocus
                 />
@@ -197,8 +200,8 @@ export function SerialNumberModal({ isOpen, onClose, onSubmit }: SerialNumberMod
                 </label>
                 <input
                   type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
+                  inputMode="text"
+                  pattern="[A-Za-z0-9]*"
                   value={serialNumber}
                   onChange={e => handleManualChange(e.target.value)}
                   className="w-full px-4 py-3 text-lg font-mono border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-primary focus:border-transparent"

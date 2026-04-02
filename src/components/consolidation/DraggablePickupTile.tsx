@@ -6,9 +6,11 @@ import type { PickupTile } from '@/types';
 
 interface DraggablePickupTileProps {
   tile: PickupTile;
+  isSelected?: boolean;
+  onSelect?: () => void;
 }
 
-export function DraggablePickupTile({ tile }: DraggablePickupTileProps) {
+export function DraggablePickupTile({ tile, isSelected, onSelect }: DraggablePickupTileProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: tile.id,
     data: { tile },
@@ -31,9 +33,9 @@ export function DraggablePickupTile({ tile }: DraggablePickupTileProps) {
         <GripVertical size={18} />
       </div>
 
-      {/* Tile Content */}
-      <div className="flex-1">
-        <PickupTileCard tile={tile} isDragging={isDragging} />
+      {/* Tile Content — tappable for selection */}
+      <div className="flex-1" onClick={onSelect}>
+        <PickupTileCard tile={tile} isDragging={isDragging} isSelected={isSelected} />
       </div>
     </div>
   );

@@ -54,7 +54,7 @@ export function getPickups(): PickupRecord[] {
 }
 
 export function getTodayPickups(): PickupRecord[] {
-  const today = new Date().toISOString().split('T')[0];
+  const today = getCurrentDate();
   return getPickups().filter(p => p.date === today);
 }
 
@@ -119,9 +119,13 @@ export function getCurrentTime(): string {
   });
 }
 
-// Get current date formatted
+// Get current date formatted (in local timezone)
 export function getCurrentDate(): string {
-  return new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 // Get formatted date for display (NZ format)
@@ -162,7 +166,7 @@ export function getDropOff(): DropOffRecord | null {
 export function getTodayDropOff(): DropOffRecord | null {
   const dropOff = getDropOff();
   if (!dropOff) return null;
-  const today = new Date().toISOString().split('T')[0];
+  const today = getCurrentDate();
   return dropOff.date === today ? dropOff : null;
 }
 
@@ -225,7 +229,7 @@ export function getConsolidation(): ConsolidationSession | null {
 export function getTodayConsolidation(): ConsolidationSession | null {
   const session = getConsolidation();
   if (!session) return null;
-  const today = new Date().toISOString().split('T')[0];
+  const today = getCurrentDate();
   return session.date === today ? session : null;
 }
 

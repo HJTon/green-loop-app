@@ -31,6 +31,12 @@ import {
   markWriteSynced,
 } from '@/utils/storage';
 
+// Parse YYYY-MM-DD date string in local timezone (avoids UTC shift)
+function parseDateLocal(dateStr: string): Date {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
 interface AppContextType {
   // Existing state
   collector: Collector | null;
@@ -155,7 +161,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       // Merge with saved state (for today only)
       const today = getCurrentDate();
-      const dateStr = date.toISOString().split('T')[0];
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
       const mergedRoute = dateStr === today ? mergeRouteWithState(newRoute) : newRoute;
 
       setSheetClients(clients);
@@ -213,7 +222,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Set view date (for "View Other Days" feature)
   // TEMP: Allow completing pickups on any date for testing
   const setViewDate = useCallback(async (dateStr: string, _readOnly: boolean = false) => {
-    const date = new Date(dateStr);
+    const date = parseDateLocal(dateStr);
 
     setIsReadOnlyView(false); // TEMP: Always allow edits for testing
     await loadRouteForDate(date);
@@ -226,7 +235,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Record bin count (write to Google Sheets and save locally as backup)
   const recordBinCount = useCallback(async (clientId: string, count: number) => {
-    const date = new Date(selectedDate);
+    const date = parseDateLocal(selectedDate);
     const writeInfo = getPickupWriteInfo(clientId, date);
 
     if (writeInfo) {
@@ -267,7 +276,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Refresh data from CSV
   const refreshData = useCallback(async () => {
     clearCache();
-    await loadRouteForDate(new Date(selectedDate));
+    await loadRouteForDate(parseDateLocal(selectedDate));
   }, [selectedDate, loadRouteForDate]);
 
   const login = (newCollector: Collector) => {

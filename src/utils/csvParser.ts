@@ -202,6 +202,10 @@ export function getDatesWithPickups(
   }
 
   return Array.from(datesWithPickups)
-    .map(dateStr => new Date(dateStr))
+    .map(dateStr => {
+      // Parse "YYYY-MM-DD" format correctly in local timezone
+      const [year, month, day] = dateStr.split('-').map(Number);
+      return new Date(year, month - 1, day);
+    })
     .sort((a, b) => a.getTime() - b.getTime());
 }

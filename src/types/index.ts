@@ -90,6 +90,7 @@ export interface PickupRecord {
   collector_id: string;
   bins_collected: number;
   bin_fullness: BinFullness[];
+  bin_serial_numbers: string[];  // Serial number for each bin collected
   notes: string;
   photos: string[];
   report: PickupReport | null;
@@ -105,6 +106,7 @@ export interface PickupTile {
   collectionType: 'bins' | 'buckets';
   fullness: BinFullness[];
   averageFullness: number;        // 0-100%
+  serialNumber: string;           // Serial number captured at pickup
   isAssigned: boolean;
 }
 

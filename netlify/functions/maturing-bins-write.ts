@@ -41,23 +41,13 @@ function getGoogleSheetsClient() {
   return google.sheets({ version: 'v4', auth });
 }
 
-// Format date for display (DD/MM/YYYY)
+// Format date for display (DD-Mon-YYYY, e.g., 29-Dec-2025)
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr);
-  return date.toLocaleDateString('en-NZ', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  });
-}
-
-// Convert fullness percentage to readable format
-function formatFullness(percent: number): string {
-  if (percent >= 100) return 'Full';
-  if (percent >= 75) return '3/4';
-  if (percent >= 50) return 'Half';
-  if (percent >= 25) return '1/4';
-  return 'Empty';
+  const day = date.getDate();
+  const month = date.toLocaleDateString('en-NZ', { month: 'short' });
+  const year = date.getFullYear();
+  return `${day}-${month}-${year}`;
 }
 
 export default async (request: Request, context: Context) => {
@@ -102,44 +92,31 @@ export default async (request: Request, context: Context) => {
 
     const sheets = getGoogleSheetsClient();
 
-    // Format contents description: "Cafe Verde (1 bin Full), Burger King (2 buckets 3/4)"
-    const contentsDescription = bin.contents
-      .map(c => {
-        const typeLabel = c.collectionType === 'bins' ? 'bin' : 'bucket';
-        const fullnessLabel = formatFullness(c.averageFullness);
-        return `${c.businessName} (${c.binsCount} ${typeLabel} ${fullnessLabel})`;
-      })
-      .join(', ');
-
-    // Format notes with collector name
-    const notesWithCollector = bin.notes
-      ? `${bin.notes} - Collected by ${collectorName}`
-      : `Collected by ${collectorName}`;
+    // Extract unique business names for locations (up to 3)
+    const uniqueBusinessNames = [...new Set(bin.contents.map(c => c.businessName))];
+    const location1 = uniqueBusinessNames[0] || '';
+    const location2 = uniqueBusinessNames[1] || '';
+    const location3 = uniqueBusinessNames[2] || '';
 
     // Prepare row data to match existing Bin Tracker columns:
     // A: Date of collection
-    // B: Content from (business names with details)
-    // C: Number (serial number)
-    // D: Colour (blank - assigned later at farm)
-    // E: Date of Maturation
-    // F: Date of Batching (blank - assigned later)
-    // G: Batch (blank - assigned later)
-    // H: Notes
+    // B: Location 1 (business name)
+    // C: Location 2 (business name)
+    // D: Location 3 (business name)
+    // E: Bin number (serial number)
+    // F onwards: Left blank - sheet calculates maturing date, colour/batch assigned later
     const rowData = [
       formatDate(bin.createdDate),      // A: Date of collection
-      contentsDescription,               // B: Content from
-      bin.serialNumber,                  // C: Number
-      '',                                // D: Colour (blank)
-      formatDate(bin.readyDate),         // E: Date of Maturation
-      '',                                // F: Date of Batching (blank)
-      '',                                // G: Batch (blank)
-      notesWithCollector,                // H: Notes
+      location1,                         // B: Location 1
+      location2,                         // C: Location 2
+      location3,                         // D: Location 3
+      bin.serialNumber,                  // E: Bin number
     ];
 
     // Append the row to the Bin Tracker sheet
     await sheets.spreadsheets.values.append({
       spreadsheetId,
-      range: 'Bin Tracker!A:H',
+      range: 'Bin Tracker!A:E',
       valueInputOption: 'USER_ENTERED',
       insertDataOption: 'INSERT_ROWS',
       requestBody: {

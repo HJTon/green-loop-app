@@ -23,6 +23,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { DatePickerModal } from '@/components/DatePickerModal';
 import { useApp } from '@/contexts/AppContext';
 import { getFarmById } from '@/utils/data';
+import { getCurrentDate } from '@/utils/storage';
 import { MapPin, Trophy, Truck, Calendar, AlertCircle, ArrowLeft, RefreshCw } from 'lucide-react';
 
 export function RouteListPage() {
@@ -74,9 +75,10 @@ export function RouteListPage() {
     }
   }, [collector, isLoading, navigate]);
 
-  // Format date for display
+  // Format date for display (parse in local timezone to avoid day shift)
   const formatDisplayDate = (dateStr: string) => {
-    const date = new Date(dateStr);
+    const [year, month, day] = dateStr.split('-').map(Number);
+    const date = new Date(year, month - 1, day);
     return date.toLocaleDateString('en-NZ', {
       weekday: 'long',
       day: 'numeric',
@@ -140,8 +142,7 @@ export function RouteListPage() {
   };
 
   const handleBackToToday = () => {
-    const today = new Date().toISOString().split('T')[0];
-    setViewDate(today, false);
+    setViewDate(getCurrentDate(), false);
   };
 
   const handleRefresh = async () => {

@@ -76,6 +76,7 @@ export function createPickupTilesFromPickups(
     // Create one tile for each bin/bucket collected
     for (let i = 0; i < pickup.bins_collected; i++) {
       const fullness = pickup.bin_fullness[i] || 'full';
+      const serialNumber = pickup.bin_serial_numbers?.[i] || '';
       tiles.push({
         id: `tile-${pickup.id}-${i}`,
         clientId: pickup.client_id,
@@ -84,6 +85,7 @@ export function createPickupTilesFromPickups(
         collectionType,
         fullness: [fullness],
         averageFullness: fullnessToPercent[fullness],
+        serialNumber,
         isAssigned: false,
       });
     }
