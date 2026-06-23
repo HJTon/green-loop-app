@@ -8,9 +8,11 @@ interface SortableStopCardProps {
   client: Client;
   onClick: () => void;
   disabled?: boolean;
+  unlocated?: boolean;
+  onRetryGeocode?: () => void | Promise<void>;
 }
 
-export function SortableStopCard({ stop, client, onClick, disabled }: SortableStopCardProps) {
+export function SortableStopCard({ stop, client, onClick, disabled, unlocated, onRetryGeocode }: SortableStopCardProps) {
   const {
     attributes,
     listeners,
@@ -35,6 +37,8 @@ export function SortableStopCard({ stop, client, onClick, disabled }: SortableSt
         dragHandleProps={disabled ? undefined : { ...attributes, ...listeners }}
         isDragging={isDragging}
         disabled={disabled}
+        unlocated={unlocated}
+        onRetryGeocode={onRetryGeocode}
       />
     </div>
   );
