@@ -1,4 +1,4 @@
-import { MapPin, Trash2, Check, SkipForward, GripVertical, Zap, Sprout, Camera, MapPinOff, RefreshCw } from 'lucide-react';
+import { MapPin, Trash2, Check, SkipForward, GripVertical, Zap, Sprout, Camera, MapPinOff, RefreshCw, MapPinned } from 'lucide-react';
 import { useState } from 'react';
 import type { Client, RouteStop, AdHocReason } from '@/types';
 
@@ -105,6 +105,15 @@ export function StopCard({ stop, client, onClick, dragHandleProps, isDragging, d
                     >
                       <Camera size={10} />
                       Find help
+                    </span>
+                  )}
+                  {client.manual_lat != null && client.manual_lng != null && (
+                    <span
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-sky-100 text-sky-800 border border-sky-300"
+                      title="Pin set manually - overrides the geocoded address"
+                    >
+                      <MapPinned size={10} />
+                      Manually set
                     </span>
                   )}
                   {unlocated && stop.status === 'pending' && (

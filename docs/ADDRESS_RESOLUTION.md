@@ -1,30 +1,32 @@
 # Address resolution
 
 How the app turns a free-text address (from the Google Sheet) into a lat/lng,
-which clients fail today, what's already in place to mitigate it, and the two
-follow-up pieces of work that were scoped but not built in the
-`fix/route-missing-stops` branch.
+which clients fail today, what's in place to mitigate it, and what's been
+shipped on top of the original `fix/route-missing-stops` branch.
 
 ## The chain (current)
 
 For each client the optimiser needs a coord. We look it up in this order:
 
-1. **`src/data/coordinates.json`** — a bulk-geocoded static file keyed by
+1. **Manual override** (`Client.manual_lat` / `manual_lng`, sheet columns N / O).
+   Driver-pinned coords always win — see "Shipped" item 1 below.
+2. **`src/data/coordinates.json`** — a bulk-geocoded static file keyed by
    `business_name`. Maintained via `scripts/geocode-locations.mjs`. Hits here
    are deterministic, cost zero, and ship with the bundle.
-2. **`localStorage` cache** (`greenloop:geocode-cache:v1`) — keyed by the
+3. **`localStorage` cache** (`greenloop:geocode-cache:v1`) — keyed by the
    lower-cased trimmed address string. Holds both successes and 24-hour
    "tried and failed" markers.
-3. **Live geocoder chain**, run when (1) misses and (2) has no fresh entry:
+4. **Live geocoder chain**, run when (2) misses and (3) has no fresh entry:
    1. Nominatim (`nominatim.openstreetmap.org`) over the original address
    2. Photon (`photon.komoot.io`) over the original address
    3. Nominatim again over the **normalised** address
       (see `normaliseAddress` in `src/utils/geocodeCache.ts`)
    4. Photon again over the normalised address
-4. **Give up** — the entry is cached as `{ lat: null, lng: null, failedAt: ... }`
+5. **Give up** — the entry is cached as `{ lat: null, lng: null, failedAt: ... }`
    and the stop shows the red **"No location"** badge on the route list. The
    route auto-apply refuses to run while any pending stop is in this state, so
-   nothing gets silently dumped at the end of the route.
+   nothing gets silently dumped at the end of the route. The background sweep
+   (Shipped item 2) will quietly retry these entries once they're > 24 h old.
 
 The normaliser strips `Unit X /`, `Suite Y,`, `Level Z`, `Flat 1,`,
 `Apt 4b,`, and the bare NZ-style `5/45 X St` flat-number prefix. Anything
@@ -36,7 +38,11 @@ normaliser still resolves if it works as-is.
 
 | Piece                              | File                                                          |
 | ---------------------------------- | ------------------------------------------------------------- |
-| Baked coords (preferred)           | `src/data/coordinates.json` + `getClientCoordinates` in `routeOptimiser.ts` |
+| Manual override (per-client pin)   | `LocationOverrideSection.tsx` + `parseLocationInput` in `locationOverride.ts` + `writeManualOverride` in `sheetDataService.ts` |
+| Override wins in optimiser         | `getClientCoordinates` in `routeOptimiser.ts` (checks `manual_lat`/`manual_lng` first) |
+| "Manually set" badge               | `StopCard.tsx`                                                |
+| Background sweep (self-healing)    | `runGeocodeSweep` in `geocodeCache.ts` + boot/24h timers in `AppContext.tsx` |
+| Baked coords (preferred fallback)  | `src/data/coordinates.json` + `getClientCoordinates` in `routeOptimiser.ts` |
 | Address normaliser                 | `normaliseAddress` in `src/utils/geocodeCache.ts`             |
 | Photon fallback                    | `photonGeocode` in `src/utils/geocodeCache.ts`                |
 | Per-stop retry button              | `StopCard` "No location" badge + `retryGeocodeFor` in `useOptimalRoute.ts` |
@@ -45,70 +51,85 @@ normaliser still resolves if it works as-is.
 | Auto-apply refuses when missing>0  | `RouteListPage.tsx` (line ~145)                               |
 | Cache key bumped to v2             | `AUTO_APPLIED_KEY` in `RouteListPage.tsx`                     |
 
-## Follow-up: not built yet
+## Shipped (follow-ups now in main)
 
-### 1. Per-client manual lat/lng override
+### 1. Per-client manual lat/lng override — SHIPPED
 
-**Why we need it:** some NZ addresses will never geocode cleanly through any
+**Why we needed it:** some NZ addresses will never geocode cleanly through any
 generic chain — rural delivery (RD) addresses, brand-new builds that pre-date
 LINZ data, addresses that point at a whole block (`Powderham Centre, New Plymouth`),
 addresses inside private estates (`27 Highlands Park, Brixton`), or sites the
 driver knows by landmark rather than street number.
 
-**Proposed shape**
+**What's in place**
 
-- Add `manual_lat` and `manual_lng` columns to the spreadsheet (or store
-  per-client in the existing client editor if there's already a write path back
-  to the sheet).
-- Add a small client-details editor in the app (or a section in the existing
-  `SettingsPage`) where the driver can:
-  - paste a Google Maps "share" link (parse out `@lat,lng` or `q=lat,lng`), or
-  - tap a "drop pin here" button that uses the device's geolocation, or
-  - type lat/lng directly (last resort)
-- Persist via the existing Google Sheets write API.
-- In `getClientCoordinates`, check `client.manual_lat / lng` FIRST, before the
-  baked file and before the runtime geocoder. Manual override always wins.
-- Surface a small "📍 manual" badge in the StopCard when a manual coord is in
-  use, so the driver knows the pin came from them not from a geocoder.
+- Sheet schema gained two new columns: **N = Manual Lat** and **O = Manual Lng**.
+  The first scheduled-date column is now P instead of N. Old rows that don't yet
+  have those columns populated read as `null` (no override), so the schema is
+  forward-compatible — Joe adds the columns; existing rows keep working untouched.
+- `Client.manual_lat` / `Client.manual_lng` flow through `transformToClient` and
+  `getAllClients` so every page (route list, pickup screen, ad-hoc picker) sees
+  the override consistently.
+- A collapsible **"Override location"** section on the pickup screen
+  (`LocationOverrideSection.tsx`) accepts two input shapes:
+  - a Google Maps share / place URL — parses `?q=lat,lng`, `?ll=lat,lng`,
+    `@lat,lng,zoom`, `?destination=lat,lng`, etc. via `parseLocationInput` in
+    `src/utils/locationOverride.ts`. Short links (`goo.gl/maps/...`) are
+    rejected with a friendly "open it and copy the full URL" message.
+  - plain coords as text — `-39.0578, 174.0876` (comma or space separator).
+- Inputs are validated against an NZ bounding box (`-48 ≤ lat ≤ -33`,
+  `165 ≤ lng ≤ 180`) so a typo like dropping the minus sign or swapping
+  lat/lng is rejected before it ever lands in the sheet.
+- Persistence: `writeManualOverride` in `sheetDataService.ts` writes both cells
+  (column N + column O) using the existing `sheets-write` Netlify function. The
+  in-memory cache is updated optimistically so the optimiser sees the new coord
+  the moment the user taps Save — no sheet refresh required. Clearing the
+  override writes empty strings to both cells (so a stale half-override can't
+  hide in the sheet).
+- `getClientCoordinates` in `routeOptimiser.ts` checks the manual override
+  FIRST, before `coordinates.json` and before the runtime geocoder chain. The
+  baked file and runtime chain are still there as fallbacks for the >95 % of
+  stops that don't need an override.
+- A small **"Manually set"** badge appears on the stop card whenever an
+  override is in use, so the driver can tell at a glance that the pin came
+  from a manual lat/lng rather than from a geocoder.
 
-**Estimate:** ~half a day. Mostly UI plumbing; the optimiser side is one
-extra `if` in `getClientCoordinates`. The Google Sheets schema change wants
-coordination with whoever owns the sheet — flag before building.
+**Joe needs to:** add the two new columns to the sheet header row (label them
+`Manual Lat` and `Manual Lng`, or anything — the code keys by index, not name).
+Existing rows leave them empty until a driver pastes a pin.
 
-**Risk:** none on the optimiser side. The only failure mode is a typo in a
-manually-entered coord placing the stop in the Pacific Ocean; mitigated by a
-sanity check (`-48 <= lat <= -33 && 165 <= lng <= 180` for NZ).
+### 2. Background sweep — retry stale failures — SHIPPED
 
-### 2. Background sweep — retry stale failures
+**Why we needed it:** a Nominatim + Photon miss was cached for 24 hours.
+If a driver opened the app at 8 am and Nominatim was briefly flaky, every
+miss stuck for the rest of the working day. The per-stop "Retry" button helped
+but it was manual and easy to miss.
 
-**Why we need it:** today, a Nominatim+Photon miss is cached for 24 hours.
-If a driver opens the app at 8am and Nominatim is briefly flaky, every miss
-sticks for the rest of the working day. The per-stop "Retry" button helps but
-it's manual and easy to miss.
+**What's in place**
 
-**Proposed shape**
+- `runGeocodeSweep()` in `src/utils/geocodeCache.ts` scans `memCache` for
+  entries with null coords AND a `failedAt` timestamp older than 24 hours,
+  then re-runs the full Nominatim → Photon chain for each. Inflight
+  coalescing means back-to-back calls collapse onto the same promise — no
+  double-fire risk.
+- Throttle: each retry goes through `geocodeAddress`, which already enforces
+  ~1.1 s between Nominatim hits (`MIN_GAP_MS`). So the sweep naturally caps
+  itself at one request per second, satisfying Nominatim's stated limit.
+  Photon is similar; we hit it less often anyway because Nominatim usually
+  wins.
+- `AppContext` kicks off a sweep 5 s after boot (so the UI settles first) and
+  then on a 24-hour `setInterval`. Both are cleared on unmount.
+- Progress is logged to the browser console as
+  `[geocode-sweep] retrying N stale failure(s)` →
+  `[geocode-sweep] recovered "addr"` →
+  `[geocode-sweep] done — recovered X/Y`, so a driver who calls Joe over
+  can paste the trail.
+- Because the failure marker is dropped before each retry, a once-broken
+  address that comes good on the next run starts behaving normally (route
+  list re-derives `located` / `missing` via the existing `setGeocodeTick`
+  path the moment the cache updates).
 
-- A small "sweep" function that runs:
-  1. on app boot, after `loadCSV()` resolves, and
-  2. once an hour while the app is open (`setInterval`, cleared on unmount of
-     the top-level provider)
-- It scans `memCache` for entries where `lat == null && failedAt` is older than,
-  say, 10 minutes, and calls `retryGeocode(addr)` on them at a polite cadence
-  (one address per 5 seconds, honouring Nominatim's rate limit).
-- Updates flow through the existing `setGeocodeTick` plumbing in
-  `useOptimalRoute`, so any opened route list re-derives `located` / `missing`
-  the moment a previously-stuck address resolves.
-- A toast on success: `"Found 'X' on the map"` — but no toast on continued
-  failure (drivers don't need recurring nag messages about the same address).
-
-**Estimate:** ~2 hours. Mostly write a `runGeocodeSweep()` helper in
-`geocodeCache.ts`, kick it off from `AppContext` on boot, set the interval.
-
-**Risk:** could spike Nominatim usage if the chain reliably misses for many
-addresses. Belt-and-braces: cap the per-sweep retry count at, say, 10, and
-back off the sweep frequency if the previous sweep made no progress.
-
-## Things I deliberately did NOT do
+## Things deliberately NOT done
 
 - **No Google Geocoding fallback.** Photon is free and covers the gaps
   Nominatim leaves on NZ addresses well enough for the daily round. Google

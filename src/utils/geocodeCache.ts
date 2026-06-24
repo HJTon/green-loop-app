@@ -305,3 +305,76 @@ export function clearGeocodeCache(): void {
     // ignore
   }
 }
+
+// --- Background sweep ----------------------------------------------------
+//
+// Once a day (and on app boot) we look back over every address we've failed
+// to geocode and quietly retry it. The goal is self-healing: if Nominatim is
+// briefly flaky at 8 am on Monday, a stop that gets a "No location" badge
+// shouldn't stay broken for the rest of the working day — it should resolve
+// the next time the sweep runs.
+//
+// Rules:
+//   - Only retry entries with null coords AND a failedAt older than 24h.
+//     Otherwise a session of failures would loop on itself within minutes.
+//   - At most one request per second, to honour Nominatim's stated limit.
+//     Photon's public endpoint is similar.
+//   - Reuse `geocodeAddress` so the 24-hour failure marker, in-flight
+//     coalescing, and persistence behaviour are identical to a normal call.
+//   - Logs progress to console so a driver who calls Joe over can paste it.
+
+const STALE_FAILURE_MS = 24 * 60 * 60 * 1000;
+
+let sweepInFlight: Promise<{ retried: number; recovered: number }> | null = null;
+
+/**
+ * Scan the cache for stale failures and retry them. Returns a summary so
+ * callers can log it (or surface a toast). Safe to call concurrently —
+ * back-to-back calls collapse onto the same promise.
+ */
+export async function runGeocodeSweep(): Promise<{ retried: number; recovered: number }> {
+  if (sweepInFlight) return sweepInFlight;
+
+  sweepInFlight = (async () => {
+    const now = Date.now();
+    // Snapshot the keys we want to retry up front so a long sweep doesn't keep
+    // re-evaluating entries we've just touched.
+    const candidates: string[] = [];
+    for (const [key, entry] of Object.entries(memCache)) {
+      if (entry.lat != null && entry.lng != null) continue;
+      if (!entry.failedAt) continue;
+      if (now - entry.failedAt < STALE_FAILURE_MS) continue;
+      candidates.push(key);
+    }
+
+    if (candidates.length === 0) {
+      console.info('[geocode-sweep] nothing stale to retry');
+      return { retried: 0, recovered: 0 };
+    }
+
+    console.info(`[geocode-sweep] retrying ${candidates.length} stale failure(s)`);
+    let recovered = 0;
+
+    for (const key of candidates) {
+      // Drop the 24h failure marker so geocodeAddress will actually run the
+      // chain again rather than return null from the cache.
+      delete memCache[key];
+      // geocodeAddress already enforces a ~1.1s gap between Nominatim calls
+      // (see lastRequestAt / MIN_GAP_MS), so we don't need a manual sleep.
+      const coord = await geocodeAddress(key);
+      if (coord) {
+        recovered++;
+        console.info(`[geocode-sweep] recovered "${key}"`);
+      }
+    }
+    saveCache(memCache);
+    console.info(`[geocode-sweep] done — recovered ${recovered}/${candidates.length}`);
+    return { retried: candidates.length, recovered };
+  })();
+
+  try {
+    return await sweepInFlight;
+  } finally {
+    sweepInFlight = null;
+  }
+}
