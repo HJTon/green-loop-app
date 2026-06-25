@@ -21,6 +21,7 @@ import { ConsolidationProgress } from '@/components/consolidation/ConsolidationP
 import { SerialNumberModal } from '@/components/consolidation/SerialNumberModal';
 import { useApp } from '@/contexts/AppContext';
 import { getFarmById } from '@/utils/data';
+import { apiFetch } from '@/utils/apiClient';
 import type { PickupTile, ConsolidationSession } from '@/types';
 import {
   createPickupTilesFromPickups,
@@ -253,7 +254,7 @@ export function ConsolidationPage() {
     try {
       // Export each bin to the maturing bins spreadsheet
       for (const bin of session.maturingBins) {
-        const response = await fetch('/.netlify/functions/maturing-bins-write', {
+        const response = await apiFetch('/.netlify/functions/maturing-bins-write', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

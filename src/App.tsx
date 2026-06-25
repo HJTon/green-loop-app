@@ -8,6 +8,10 @@ import { ConfirmationPage } from '@/pages/ConfirmationPage';
 import { SummaryPage } from '@/pages/SummaryPage';
 import { DropOffPage } from '@/pages/DropOffPage';
 import { ConsolidationPage } from '@/pages/ConsolidationPage';
+import { AddPickupPage } from '@/pages/AddPickupPage';
+import { LoadVanPage } from '@/pages/LoadVanPage';
+import { SplitPlannerPage } from '@/pages/SplitPlannerPage';
+import { SettingsPage } from '@/pages/SettingsPage';
 
 function AppRoutes() {
   const { toasts, dismissToast } = useApp();
@@ -16,12 +20,16 @@ function AppRoutes() {
     <>
       <Routes>
         <Route path="/" element={<LoginPage />} />
+        <Route path="/load-van" element={<LoadVanPage />} />
+        <Route path="/split" element={<SplitPlannerPage />} />
         <Route path="/route" element={<RouteListPage />} />
+        <Route path="/add-pickup" element={<AddPickupPage />} />
         <Route path="/pickup/:clientId" element={<PickupPage />} />
         <Route path="/confirmation/:clientId" element={<ConfirmationPage />} />
         <Route path="/consolidation" element={<ConsolidationPage />} />
         <Route path="/dropoff" element={<DropOffPage />} />
         <Route path="/summary" element={<SummaryPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />

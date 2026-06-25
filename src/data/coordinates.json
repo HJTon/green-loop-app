@@ -1,0 +1,74 @@
+{
+  "Altherm": {
+    "lat": -39.0569805,
+    "lng": 174.0992184,
+    "address": "53a Rimu Street, Strandon, New Plymouth",
+    "matchedAs": "Rimu Street, East End, Glen Avon, New Plymouth, New Plymouth District, Taranaki, 4312, New Zealand / Aotearoa"
+  },
+  "Columbus Coffee": {
+    "lat": -39.0465122,
+    "lng": 174.1142001,
+    "address": "5 Vickers Road, New Plymouth",
+    "matchedAs": "5A, Vickers Road, Fitzroy, New Plymouth, New Plymouth District, Taranaki, 4312, New Zealand / Aotearoa"
+  },
+  "NP Community Foodbank Trust": {
+    "lat": -39.0598944,
+    "lng": 174.0722474,
+    "address": "40 Vivian Street, New Plymouth",
+    "matchedAs": "40, Vivian Street, Lower Vogeltown, Westown, New Plymouth, New Plymouth District, Taranaki, 4310, New Zealand / Aotearoa"
+  },
+  "Juno Gin": {
+    "lat": -39.0766863,
+    "lng": 174.0545139,
+    "address": "16D Sunley Street, New Plymouth",
+    "matchedAs": "Sunley Street, Westown, New Plymouth, New Plymouth District, Taranaki, 4310, New Zealand / Aotearoa"
+  },
+  "Novotel New Plymouth": {
+    "lat": -39.0562104,
+    "lng": 174.086927,
+    "address": "48 Hobson Street, New Plymouth",
+    "matchedAs": "Novotel, Leach Street, East End, Strandon, New Plymouth"
+  },
+  "TOI Foundation": {
+    "lat": -39.0544069,
+    "lng": 174.0814337,
+    "address": "121 Gill Street, New Plymouth",
+    "matchedAs": "121, Gill Street, East End, Strandon, New Plymouth, New Plymouth District, Taranaki, 4310, New Zealand / Aotearoa"
+  },
+  "farm:1": {
+    "lat": -39.1858413,
+    "lng": 174.0796625,
+    "address": "274 Korito Road, New Plymouth",
+    "matchedAs": "274, Korito Road, New Plymouth, New Plymouth District, Taranaki, 4371, New Zealand / Aotearoa"
+  },
+  "start:envirohub": {
+    "lat": -39.069446,
+    "lng": 174.0823865,
+    "address": "28 Brooklands Park Drive, New Plymouth",
+    "matchedAs": "28, Brooklands Park Drive, Brooklands, Welbourn, New Plymouth, New Plymouth District, Taranaki, 4310, New Zealand / Aotearoa"
+  },
+  "Life Skills": {
+    "lat": -39.0758973,
+    "lng": 174.0327184,
+    "address": "8 Manadon Street, Spotswood, New Plymouth",
+    "matchedAs": "8, Manadon Street, Spotswood, New Plymouth, New Plymouth District, Taranaki, 4310, New Zealand / Aotearoa"
+  },
+  "Venture Taranaki": {
+    "lat": -39.0580492,
+    "lng": 174.0727838,
+    "address": "50 Devon Street West, New Plymouth",
+    "matchedAs": "Venture Taranaki, 50, Devon Street West, Westown, New Plymouth, New Plymouth District, Taranaki, 4310, New Zealand / Aotearoa"
+  },
+  "New Plymouth Top 10 Holiday Park": {
+    "lat": -39.0465851,
+    "lng": 174.1075843,
+    "address": "29 Princes Street, Fitzroy, New Plymouth",
+    "matchedAs": "29, Princes Street, Fitzroy, New Plymouth, New Plymouth District, Taranaki, 4312, New Zealand / Aotearoa"
+  },
+  "TSB Bank Ltd - Call Centre and Branch": {
+    "lat": -39.0573941,
+    "lng": 174.0781403,
+    "address": "97 Courtenay Street, New Plymouth",
+    "matchedAs": "97 Courtenay Street, East End, New Plymouth (via Photon geocoder)"
+  }
+}

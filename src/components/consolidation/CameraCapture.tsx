@@ -7,6 +7,14 @@ interface CameraCaptureProps {
   onCancel: () => void;
 }
 
+// The serial-number scan window, as fractions of the video frame. We crop the
+// captured image to exactly this region before sending it to OCR so that a
+// duplicate sticker above the bin (or a reflection) outside the box can't get
+// read in and double the number. The on-screen guide uses the same fractions
+// so what the driver frames is what we actually scan.
+const CROP_W_FRAC = 0.82; // a touch wider so digits that drift sideways still land inside
+const CROP_H_FRAC = 0.24;
+
 export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -57,12 +65,20 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
 
     if (!context) return;
 
-    // Set canvas size to match video
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    // Crop to the targeting box (centred) rather than the whole frame, so only
+    // the number inside the guide is sent to OCR.
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    const sw = Math.round(vw * CROP_W_FRAC);
+    const sh = Math.round(vh * CROP_H_FRAC);
+    const sx = Math.round((vw - sw) / 2);
+    const sy = Math.round((vh - sh) / 2);
 
-    // Draw the current frame
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.width = sw;
+    canvas.height = sh;
+
+    // Draw only the cropped source region into the canvas
+    context.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
 
     // Get image data as base64
     const imageData = canvas.toDataURL('image/jpeg', 0.9);
@@ -106,11 +122,14 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
           className="w-full h-auto"
         />
 
-        {/* Overlay with targeting guide */}
+        {/* Overlay with targeting guide — same fractions as the crop region */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="border-2 border-white/50 rounded-lg w-3/4 h-16 flex items-center justify-center">
-            <span className="text-white/70 text-sm bg-black/30 px-2 py-1 rounded">
-              Align serial number here
+          <div
+            className="border-2 border-white/70 rounded-lg flex items-center justify-center"
+            style={{ width: `${CROP_W_FRAC * 100}%`, height: `${CROP_H_FRAC * 100}%` }}
+          >
+            <span className="text-white/80 text-xs text-center bg-black/40 px-2 py-1 rounded">
+              Fill the box with just the number
             </span>
           </div>
         </div>

@@ -1,10 +1,10 @@
-import type { BinFullness } from '@/types';
+import type { BinFullness, CollectionType } from '@/types';
 
 interface FullnessSelectorProps {
   index: number;
   value: BinFullness | null;
   onChange: (value: BinFullness) => void;
-  collectionType: 'bins' | 'buckets';
+  collectionType: CollectionType;
 }
 
 const fullnessOptions: { value: BinFullness; label: string; percentage: number }[] = [

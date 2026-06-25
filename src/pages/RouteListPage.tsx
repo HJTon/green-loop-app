@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   DndContext,
@@ -19,12 +19,58 @@ import { Header } from '@/components/Header';
 import { ProgressBar } from '@/components/ProgressBar';
 import { SortableStopCard } from '@/components/SortableStopCard';
 import { Button } from '@/components/Button';
+import { AddPickupButton } from '@/components/AddPickupButton';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 import { DatePickerModal } from '@/components/DatePickerModal';
+import { OptimiseRouteModal } from '@/components/OptimiseRouteModal';
 import { useApp } from '@/contexts/AppContext';
 import { getFarmById } from '@/utils/data';
 import { getCurrentDate } from '@/utils/storage';
-import { MapPin, Trophy, Truck, Calendar, AlertCircle, ArrowLeft, RefreshCw } from 'lucide-react';
+import {
+  MapPin, Trophy, Truck, Calendar, AlertCircle, ArrowLeft, RefreshCw, Package,
+  Loader2, Navigation, Sparkles, Settings, Split,
+} from 'lucide-react';
+import { useOptimalRoute } from '@/hooks/useOptimalRoute';
+import {
+  buildGoogleMapsUrl,
+  getActiveStartLocationsWithCoords,
+  getActiveFarmsWithCoords,
+} from '@/utils/routeOptimiser';
+import { binsForStops, BIN_CAPACITY } from '@/utils/vanLoad';
+
+// v2 (Jun 2026): bumped from v1 to invalidate any route that was auto-applied
+// while the silent-append-of-unlocated-stops bug was live. Routes recorded under
+// v1 keep their (potentially poisoned) saved order until manually re-optimised;
+// routes seeing v2 for the first time get a fresh auto-apply attempt and now
+// refuse to apply unless every pending stop has been located.
+const AUTO_APPLIED_KEY = 'greenloop:auto-optimised-routes:v2';
+
+function loadAutoApplied(): Set<string> {
+  try {
+    const raw = localStorage.getItem(AUTO_APPLIED_KEY);
+    if (!raw) return new Set();
+    return new Set(JSON.parse(raw) as string[]);
+  } catch {
+    return new Set();
+  }
+}
+
+function persistAutoApplied(set: Set<string>): void {
+  try {
+    localStorage.setItem(AUTO_APPLIED_KEY, JSON.stringify(Array.from(set)));
+  } catch {
+    // ignore
+  }
+}
+
+function formatDuration(seconds: number): string {
+  const totalMin = Math.round(seconds / 60);
+  if (totalMin < 1) return '<1 min';
+  if (totalMin < 60) return `${totalMin} min`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return m === 0 ? `${h} h` : `${h} h ${m} min`;
+}
 
 export function RouteListPage() {
   const navigate = useNavigate();
@@ -34,6 +80,7 @@ export function RouteListPage() {
     completedCount,
     totalStops,
     reorderStops,
+    applyStopOrder,
     allPickupsComplete,
     isLoading,
     loadError,
@@ -44,12 +91,85 @@ export function RouteListPage() {
     availableDates,
     refreshData,
     addToast,
+    splitState,
+    setActiveRun,
+    applyRunOrder,
   } = useApp();
 
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showOptimiser, setShowOptimiser] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const destinationFarm = route?.destination_farm_id ? getFarmById(route.destination_farm_id) : undefined;
+  // Endpoint selection — defaults to the only Envirohub start and the route's
+  // assigned destination farm. Can be overridden via the settings modal.
+  const startOptions = useMemo(() => getActiveStartLocationsWithCoords(), []);
+  const farmOptions = useMemo(() => getActiveFarmsWithCoords(), []);
+
+  const [startId, setStartId] = useState<string>(startOptions[0]?.id ?? '');
+  const [finishId, setFinishId] = useState<string>('');
+
+  // Keep finishId in sync with whatever route is loaded, unless the user has
+  // explicitly chosen one for this session.
+  const userPickedFinishRef = useRef(false);
+  useEffect(() => {
+    if (userPickedFinishRef.current) return;
+    if (!route) return;
+    const fromRoute = route.destination_farm_id;
+    if (fromRoute && farmOptions.some(f => f.id === fromRoute)) {
+      setFinishId(fromRoute);
+    } else if (farmOptions[0]) {
+      setFinishId(farmOptions[0].id);
+    }
+  }, [route, farmOptions]);
+
+  // Drive the optimisation pipeline. Disabled in read-only view (where editing
+  // is off anyway) and when there's no route loaded yet.
+  const optimisation = useOptimalRoute({
+    stops: route?.stops ?? [],
+    getClientById,
+    startId,
+    finishId,
+    // In split mode each run is optimised by the split planner, so the
+    // single-route optimiser (and its auto-apply) stays off.
+    enabled: !!route && !isReadOnlyView && !splitState?.enabled && startId !== '' && finishId !== '',
+  });
+
+  // Auto-apply the optimal order ONCE per route ID, so manual reorders aren't
+  // clobbered on every re-render or page revisit.
+  //
+  // CRITICAL: only auto-apply when EVERY pending stop is located. If any stop
+  // has no coord (geocoder miss / Nominatim failure), it would otherwise be
+  // silently appended at the end of the route by applyStopOrder, dragging the
+  // driver back into town for a final pickup after they've already swept out
+  // toward the farm. Refuse to apply in that case — the banner will warn the
+  // driver and they can open the modal to investigate the unplaced stops.
+  const autoAppliedRef = useRef<Set<string>>(loadAutoApplied());
+  useEffect(() => {
+    if (!route) return;
+    if (optimisation.status !== 'ready') return;
+    if (optimisation.optimalIds.length === 0) return;
+    if (optimisation.missing.length > 0) return; // see note above
+    if (autoAppliedRef.current.has(route.id)) return;
+
+    // Check whether the current order already matches optimal — if so, just
+    // record that we've "applied" and skip the toast.
+    const sortedPending = route.stops
+      .filter(s => s.status === 'pending')
+      .sort((a, b) => a.position - b.position)
+      .map(s => s.client_id);
+    const optimalSet = new Set(optimisation.optimalIds);
+    const currentPendingInOptimalSet = sortedPending.filter(id => optimalSet.has(id));
+    const alreadyOptimal =
+      currentPendingInOptimalSet.length === optimisation.optimalIds.length &&
+      currentPendingInOptimalSet.every((id, i) => id === optimisation.optimalIds[i]);
+
+    if (!alreadyOptimal) {
+      applyStopOrder(optimisation.optimalIds);
+      addToast('success', 'Route reordered to suggested driving order');
+    }
+    autoAppliedRef.current.add(route.id);
+    persistAutoApplied(autoAppliedRef.current);
+  }, [route, optimisation.status, optimisation.optimalIds, optimisation.missing.length, applyStopOrder, addToast]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -110,12 +230,57 @@ export function RouteListPage() {
     return null;
   }
 
+  const destinationFarm = route.destination_farm_id ? getFarmById(route.destination_farm_id) : undefined;
   const allComplete = completedCount === totalStops;
   const sortedStops = [...route.stops].sort((a, b) => a.position - b.position);
 
+  // --- Two-run split state -------------------------------------------------
+  const isSplit = !!splitState?.enabled;
+  const activeRun = splitState?.activeRun ?? 1;
+  const otherRun: 1 | 2 = activeRun === 1 ? 2 : 1;
+  const activeEndpoints = isSplit ? (activeRun === 1 ? splitState!.run1 : splitState!.run2) : null;
+  // Endpoints used for the maps export: the active run's when split, else the
+  // session-selected start/finish.
+  const effStartId = activeEndpoints ? activeEndpoints.startId : startId;
+  const effFinishId = activeEndpoints ? activeEndpoints.finishId : finishId;
+  const startLocation = startOptions.find(s => s.id === effStartId);
+  const finishFarm = farmOptions.find(f => f.id === effFinishId);
+
+  // Stops shown on this page: only the active run when split.
+  const visibleStops = isSplit ? sortedStops.filter(s => s.run === activeRun) : sortedStops;
+  const activeCompleted = visibleStops.filter(s => s.status === 'completed' || s.status === 'skipped').length;
+  const activeTotal = visibleStops.length;
+  const activeRunComplete = activeTotal > 0 && activeCompleted === activeTotal;
+  const otherRunPending = isSplit && sortedStops.some(s => s.run === otherRun && s.status === 'pending');
+  const allRunsComplete = route.stops.length > 0 && route.stops.every(s => s.status !== 'pending');
+
+  // Bins on the whole day — drives the "offer to split" prompt when not split.
+  const totalBinsForDay = binsForStops(route.stops, getClientById);
+
+  // Drop-off is reachable once the relevant pickups are done: the active run in
+  // split mode, or every stop otherwise.
+  const canDropOff = isSplit ? activeRunComplete : allPickupsComplete;
+
+  // Compute "current order vs optimal" delta — only meaningful once ready.
+  const currentPendingIds = sortedStops
+    .filter(s => s.status === 'pending' && optimisation.located.some(l => l.id === s.client_id))
+    .map(s => s.client_id);
+  const currentCost = optimisation.status === 'ready' ? optimisation.costForOrder(currentPendingIds) : null;
+  const deltaSeconds = currentCost && optimisation.optimalSeconds
+    ? currentCost.seconds - optimisation.optimalSeconds
+    : 0;
+
+  // Whether the located stops are already in the optimal order. Used to decide
+  // if the "Restore optimal" button has anything to do — independent of the
+  // 10-second delta threshold, since after a manual drag we want drivers to be
+  // able to snap back even when the cost difference is tiny.
+  const currentOrderMatchesOptimal =
+    optimisation.optimalIds.length > 0 &&
+    currentPendingIds.length === optimisation.optimalIds.length &&
+    currentPendingIds.every((id, i) => id === optimisation.optimalIds[i]);
+
   const handleStopClick = (clientId: string) => {
     if (isReadOnlyView) {
-      // In read-only mode, just show info (don't navigate to pickup form)
       return;
     }
     navigate(`/pickup/${clientId}`);
@@ -130,13 +295,19 @@ export function RouteListPage() {
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
-    if (isReadOnlyView) return; // Disable reordering in read-only mode
-
+    if (isReadOnlyView) return;
     const { active, over } = event;
-
-    if (over && active.id !== over.id) {
-      const oldIndex = sortedStops.findIndex(s => s.client_id === active.id);
-      const newIndex = sortedStops.findIndex(s => s.client_id === over.id);
+    if (!over || active.id === over.id) return;
+    const oldIndex = visibleStops.findIndex(s => s.client_id === active.id);
+    const newIndex = visibleStops.findIndex(s => s.client_id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    if (isSplit) {
+      // Reorder within the active run only, preserving the other run's order.
+      const ids = visibleStops.map(s => s.client_id);
+      const [moved] = ids.splice(oldIndex, 1);
+      ids.splice(newIndex, 0, moved);
+      applyRunOrder(activeRun, ids);
+    } else {
       reorderStops(oldIndex, newIndex);
     }
   };
@@ -150,16 +321,46 @@ export function RouteListPage() {
     try {
       await refreshData();
       addToast('success', 'Route data refreshed');
-    } catch (error) {
+    } catch {
       addToast('error', 'Failed to refresh data');
     } finally {
       setIsRefreshing(false);
     }
   };
 
+  const handleRestoreOptimal = () => {
+    if (optimisation.optimalIds.length === 0) return;
+    applyStopOrder(optimisation.optimalIds);
+    addToast('success', 'Restored optimal order');
+  };
+
+  const handleOpenInMaps = () => {
+    if (!startLocation || !finishFarm) return;
+    // Only navigate to stops we haven't finished yet — driver doesn't want
+    // turn-by-turn to places they've already visited. In split mode this is
+    // already scoped to the active run via visibleStops.
+    const orderedAddresses = visibleStops
+      .filter(s => s.status === 'pending')
+      .map(s => getClientById(s.client_id))
+      .filter((c): c is NonNullable<typeof c> => c != null && !!c.address)
+      .map(c => c.address);
+    if (orderedAddresses.length === 0) {
+      // Nothing pending — just go straight to the drop-off farm.
+      const url = buildGoogleMapsUrl([startLocation.address, finishFarm.address]);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    const url = buildGoogleMapsUrl([
+      startLocation.address,
+      ...orderedAddresses,
+      finishFarm.address,
+    ]);
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header title={isReadOnlyView ? 'Viewing Schedule' : "Today's Route"} showLogout />
+      <Header title={isReadOnlyView ? 'Viewing Schedule' : "Today's Route"} showLogout showSettings />
 
       {/* Read-only View Banner */}
       {isReadOnlyView && (
@@ -185,23 +386,32 @@ export function RouteListPage() {
       <div className="bg-white px-4 py-4 border-b border-gray-200">
         {!isReadOnlyView && (
           <ProgressBar
-            current={completedCount}
-            total={totalStops}
-            label="Route Progress"
+            current={isSplit ? activeCompleted : completedCount}
+            total={isSplit ? activeTotal : totalStops}
+            label={isSplit ? `Run ${activeRun} of 2` : 'Route Progress'}
           />
         )}
 
-        {/* Date and View Other Days */}
         <div className="flex items-center justify-between mt-3">
           <div className="flex items-center gap-2 text-sm text-gray-600">
             <MapPin size={16} className="text-green-primary" />
             <span>
               {isReadOnlyView
                 ? `${totalStops} stops scheduled`
-                : `Starting from: ${route.start_location}`}
+                : `Starting from: ${startLocation?.name ?? route.start_location}`}
             </span>
           </div>
           <div className="flex items-center gap-3">
+            {!isReadOnlyView && (
+              <button
+                onClick={() => navigate('/load-van')}
+                className="flex items-center gap-1 text-sm text-gray-500 hover:text-green-primary transition-colors"
+                title="Van loading summary"
+              >
+                <Package size={16} />
+                <span>Load van</span>
+              </button>
+            )}
             <button
               onClick={handleRefresh}
               disabled={isRefreshing}
@@ -220,8 +430,69 @@ export function RouteListPage() {
           </div>
         </div>
 
-        {/* Drag hint - only in edit mode */}
-        {!isReadOnlyView && (
+        {/* Split-mode status + run switcher */}
+        {!isReadOnlyView && isSplit && (
+          <div className="mt-3 rounded-lg border border-lime-accent bg-lime-50 px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-sm text-green-dark">
+                <Split size={16} className="shrink-0" />
+                <span className="font-medium">
+                  Run {activeRun} of 2 · {visibleStops.filter(s => s.status === 'pending').reduce((n, s) => {
+                    const c = getClientById(s.client_id);
+                    return n + (c && c.collection_type === 'bins' ? (c.expected_quantity || 1) : 0);
+                  }, 0)} bins
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => setActiveRun(otherRun)}
+                  className="text-xs font-semibold text-green-dark underline"
+                >
+                  View Run {otherRun}
+                </button>
+                <button
+                  onClick={() => navigate('/split')}
+                  aria-label="Edit split"
+                  className="text-green-dark"
+                >
+                  <Settings size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Offer to split when the day is too big and not yet split */}
+        {!isReadOnlyView && !isSplit && totalBinsForDay > BIN_CAPACITY && (
+          <button
+            onClick={() => navigate('/split')}
+            className="mt-3 w-full text-left rounded-lg border-2 border-green-primary bg-green-primary/10 px-3 py-2 flex items-center gap-2 hover:bg-green-primary/15 transition-colors"
+          >
+            <Split size={16} className="text-green-primary shrink-0" />
+            <span className="text-sm flex-1 text-green-dark">
+              <span className="font-semibold">{totalBinsForDay} bins</span> is over a van load — split into two runs?
+            </span>
+            <span className="text-xs font-semibold text-green-primary shrink-0">Plan split</span>
+          </button>
+        )}
+
+        {/* Optimisation status banner (single-run only) */}
+        {!isReadOnlyView && !isSplit && totalStops > 0 && (
+          <div className="mt-3">
+            <OptimisationBanner
+              status={optimisation.status}
+              optimalSeconds={optimisation.optimalSeconds}
+              deltaSeconds={deltaSeconds}
+              missingCount={optimisation.missing.length}
+              error={optimisation.error}
+              onOpenSettings={() => setShowOptimiser(true)}
+              onRestoreOptimal={handleRestoreOptimal}
+              canRestore={optimisation.optimalIds.length > 0 && !currentOrderMatchesOptimal}
+            />
+          </div>
+        )}
+
+        {!isReadOnlyView && totalStops > 0 && (
           <p className="text-xs text-gray-400 mt-2">
             Drag the handle to reorder stops
           </p>
@@ -243,13 +514,36 @@ export function RouteListPage() {
         </div>
       )}
 
-      {/* Route Complete Banner - only for today */}
-      {!isReadOnlyView && allComplete && totalStops > 0 && (
+      {/* Run-complete banner (split mode) — drop off, then start the next run */}
+      {!isReadOnlyView && isSplit && activeRunComplete && otherRunPending && (
+        <div className="bg-lime-accent px-4 py-3">
+          <div className="flex items-center gap-2 mb-2">
+            <Trophy className="text-green-dark" size={20} />
+            <span className="font-semibold text-green-dark">Run {activeRun} complete!</span>
+          </div>
+          <p className="text-sm text-green-dark mb-2">
+            Drop these bins at the farm, reload empties, then start Run {otherRun}.
+          </p>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={handleDropOff} className="flex-1">
+              <Truck size={16} className="mr-1" />
+              Drop off
+            </Button>
+            <Button size="sm" onClick={() => setActiveRun(otherRun)} className="flex-1">
+              Start Run {otherRun}
+              <ArrowLeft size={16} className="ml-1 rotate-180" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Route Complete Banner - single run, or both runs done */}
+      {!isReadOnlyView && totalStops > 0 && (isSplit ? allRunsComplete : allComplete) && (
         <div className="bg-lime-accent px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Trophy className="text-green-dark" size={20} />
             <span className="font-semibold text-green-dark">
-              Route Complete!
+              {isSplit ? 'Both runs complete!' : 'Route Complete!'}
             </span>
           </div>
           <Button size="sm" onClick={handleViewSummary}>
@@ -261,18 +555,41 @@ export function RouteListPage() {
       {/* Stops List with Drag and Drop */}
       {totalStops > 0 && (
         <div className="p-4 space-y-3">
+          {/* Persistent Open in Google Maps button */}
+          {!isReadOnlyView && startLocation && finishFarm && (
+            <Button onClick={handleOpenInMaps} className="w-full" size="lg">
+              <Navigation size={18} className="mr-2" />
+              Open route in Google Maps
+            </Button>
+          )}
+
           <DndContext
             sensors={isReadOnlyView ? [] : sensors}
             collisionDetection={closestCenter}
             onDragEnd={handleDragEnd}
           >
             <SortableContext
-              items={sortedStops.map(s => s.client_id)}
+              items={visibleStops.map(s => s.client_id)}
               strategy={verticalListSortingStrategy}
             >
-              {sortedStops.map(stop => {
+              {visibleStops.map(stop => {
                 const client = getClientById(stop.client_id);
                 if (!client) return null;
+                const isUnlocated =
+                  stop.status === 'pending' &&
+                  optimisation.missing.some(m => m.id === stop.client_id);
+                const handleRetry = async () => {
+                  if (!client.address) return;
+                  const coord = await optimisation.retryGeocodeFor(client.address);
+                  if (coord) {
+                    addToast('success', `Found "${client.business_name}" on the map`);
+                  } else {
+                    addToast(
+                      'error',
+                      `Still couldn't place "${client.business_name}" — try editing the address in the sheet`
+                    );
+                  }
+                };
 
                 return (
                   <SortableStopCard
@@ -281,6 +598,8 @@ export function RouteListPage() {
                     client={client}
                     onClick={() => handleStopClick(stop.client_id)}
                     disabled={isReadOnlyView}
+                    unlocated={isUnlocated}
+                    onRetryGeocode={isUnlocated ? handleRetry : undefined}
                   />
                 );
               })}
@@ -295,9 +614,9 @@ export function RouteListPage() {
               </p>
               <button
                 onClick={handleDropOff}
-                disabled={!allPickupsComplete}
+                disabled={!canDropOff}
                 className={`w-full p-4 rounded-xl border-2 text-left transition-all duration-200 ${
-                  allPickupsComplete
+                  canDropOff
                     ? 'border-lime-accent bg-lime-50 hover:bg-lime-100'
                     : 'border-gray-200 bg-gray-100 opacity-60'
                 }`}
@@ -306,7 +625,7 @@ export function RouteListPage() {
                   <div className="flex items-start gap-3 flex-1">
                     <div
                       className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-                        allPickupsComplete
+                        canDropOff
                           ? 'bg-lime-accent text-green-dark'
                           : 'bg-gray-300 text-gray-500'
                       }`}
@@ -321,9 +640,9 @@ export function RouteListPage() {
                         <MapPin size={14} />
                         <span className="truncate">{destinationFarm.address}</span>
                       </div>
-                      {!allPickupsComplete && (
+                      {!canDropOff && (
                         <p className="text-xs text-gray-400 mt-2">
-                          Complete all pickups first
+                          {isSplit ? `Finish Run ${activeRun} first` : 'Complete all pickups first'}
                         </p>
                       )}
                     </div>
@@ -336,16 +655,150 @@ export function RouteListPage() {
       )}
 
       {/* Bottom padding for safe area */}
-      <div className="h-8" />
+      <div className="h-24" />
 
-      {/* Date Picker Modal */}
+      {/* Floating Add-Pickup button (today only, not in read-only) */}
+      {!isReadOnlyView && selectedDate === getCurrentDate() && (
+        <AddPickupButton variant="fab" />
+      )}
+
+      {/* Route options modal — only used now to override the default start/finish. */}
+      <OptimiseRouteModal
+        isOpen={showOptimiser}
+        onClose={() => setShowOptimiser(false)}
+        stops={route.stops}
+        getClientById={getClientById}
+        destinationFarmId={route.destination_farm_id}
+        startId={startId}
+        finishId={finishId}
+        onChangeStart={(id) => setStartId(id)}
+        onChangeFinish={(id) => {
+          userPickedFinishRef.current = true;
+          setFinishId(id);
+          // Allow the new endpoints to re-trigger an auto-apply for this route.
+          autoAppliedRef.current.delete(route.id);
+          persistAutoApplied(autoAppliedRef.current);
+        }}
+        onApplyOrder={(ids) => {
+          applyStopOrder(ids);
+          addToast('success', 'Route reordered to suggested order');
+        }}
+      />
+
       <DatePickerModal
         isOpen={showDatePicker}
         onClose={() => setShowDatePicker(false)}
-        onSelectDate={(date) => setViewDate(date, false)} // TEMP: Allow edits on any date for testing
+        onSelectDate={(date) => setViewDate(date, false)}
         selectedDate={selectedDate}
         availableDates={availableDates}
       />
     </div>
+  );
+}
+
+interface BannerProps {
+  status: ReturnType<typeof useOptimalRoute>['status'];
+  optimalSeconds: number;
+  deltaSeconds: number;
+  missingCount: number;
+  error: string | null;
+  onOpenSettings: () => void;
+  onRestoreOptimal: () => void;
+  canRestore: boolean;
+}
+
+function OptimisationBanner({
+  status,
+  optimalSeconds,
+  deltaSeconds,
+  missingCount,
+  error,
+  onOpenSettings,
+  onRestoreOptimal,
+  canRestore,
+}: BannerProps) {
+  if (status === 'idle') return null;
+
+ 
+  const Wrap = ({ children, tone }: { children: React.ReactNode; tone: 'info' | 'success' | 'warn' }) => {
+    const colors =
+      tone === 'success'
+        ? 'bg-lime-50 border-lime-accent text-green-dark'
+        : tone === 'warn'
+          ? 'bg-amber-50 border-amber-200 text-amber-900'
+          : 'bg-blue-50 border-blue-200 text-blue-900';
+    return (
+      <div className={`rounded-lg border px-3 py-2 flex items-center gap-2 ${colors}`}>
+        {children}
+      </div>
+    );
+  };
+
+  if (status === 'geocoding') {
+    return (
+      <Wrap tone="info">
+        <Loader2 size={16} className="animate-spin shrink-0" />
+        <span className="text-sm">Looking up addresses...</span>
+      </Wrap>
+    );
+  }
+
+  if (status === 'fetching') {
+    return (
+      <Wrap tone="info">
+        <Loader2 size={16} className="animate-spin shrink-0" />
+        <span className="text-sm">Optimising route...</span>
+      </Wrap>
+    );
+  }
+
+  if (status === 'unavailable') {
+    return (
+      <Wrap tone="warn">
+        <AlertCircle size={16} className="shrink-0" />
+        <span className="text-sm flex-1">
+          Could not fetch driving times{error ? ` (${error.slice(0, 60)})` : ''}. Manual order only.
+        </span>
+        <button onClick={onOpenSettings} className="text-xs underline shrink-0">Options</button>
+      </Wrap>
+    );
+  }
+
+  // status === 'ready'
+  // Any unplaced stops dominate the messaging: the auto-apply was refused, the
+  // reported optimal-driving time only covers the located subset, and the
+  // driver needs to know that stops exist outside the optimisation.
+  const onOptimal = deltaSeconds <= 10;
+  const tone: 'success' | 'warn' = missingCount > 0 ? 'warn' : (onOptimal ? 'success' : 'warn');
+  const missingCopy =
+    missingCount > 0
+      ? ` ${missingCount} stop${missingCount === 1 ? '' : 's'} could not be placed - review in route options.`
+      : '';
+
+  return (
+    <Wrap tone={tone}>
+      <Sparkles size={16} className="shrink-0" />
+      <div className="flex-1 text-sm">
+        {onOptimal ? (
+          <>
+            Optimal route - about <span className="font-semibold">{formatDuration(optimalSeconds)}</span> driving.
+            {missingCopy}
+          </>
+        ) : (
+          <>
+            Current order is <span className="font-semibold">+{formatDuration(deltaSeconds)}</span> longer than optimal.
+            {missingCopy}
+          </>
+        )}
+      </div>
+      {canRestore && (
+        <button onClick={onRestoreOptimal} className="text-xs font-semibold underline shrink-0">
+          Restore optimal
+        </button>
+      )}
+      <button onClick={onOpenSettings} aria-label="Route options" className="shrink-0 ml-1">
+        <Settings size={14} />
+      </button>
+    </Wrap>
   );
 }

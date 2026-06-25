@@ -149,6 +149,8 @@ export function SummaryPage() {
                     <p className="text-sm text-gray-500">
                       {pickup.status === 'skipped'
                         ? 'Skipped'
+                        : client?.collection_type === 'soil'
+                        ? 'Soil / green-waste dropped'
                         : `${pickup.bins_collected}x ${pickup.bin_fullness.join(', ')}`}
                     </p>
                   </div>

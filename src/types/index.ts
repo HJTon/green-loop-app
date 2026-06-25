@@ -74,6 +74,29 @@ export interface RouteStop {
   adHocReason?: AdHocReason;
   // Brand-new off-sheet location (recorded to Pickup Notes, not the schedule grid)
   isNewLocation?: boolean;
+  // Which van run this stop belongs to when a big day is split in two. Undefined
+  // on every non-split day — the whole single-run code path keys off "no run".
+  // `position` is interpreted within the run when this is set.
+  run?: 1 | 2;
+}
+
+// A day too big for one van load gets split into two runs. This captures the
+// non-stop split metadata (the per-stop assignment lives on RouteStop.run).
+// Each run picks its own start/finish so the driver can, e.g., end run 1 back at
+// the depot and only drop at the farm on run 2.
+export interface RunEndpoints {
+  startId: string;
+  finishId: string;
+}
+
+export interface RouteSplitState {
+  routeId: string;
+  enabled: boolean;
+  // Which run the driver chose to do first, and which they're doing right now.
+  firstRun: 1 | 2;
+  activeRun: 1 | 2;
+  run1: RunEndpoints;
+  run2: RunEndpoints;
 }
 
 export interface Route {

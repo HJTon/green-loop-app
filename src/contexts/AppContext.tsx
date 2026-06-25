@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
-import type { Collector, Route, PickupRecord, RouteStop, DropOffRecord, Client, AdHocReason, PickupReport, CollectionType } from '@/types';
+import type { Collector, Route, PickupRecord, RouteStop, RouteSplitState, RunEndpoints, DropOffRecord, Client, AdHocReason, PickupReport, CollectionType } from '@/types';
 import type { PendingWrite } from '@/types/sheet';
 import type { ToastMessage } from '@/components/Toast';
 import { getCollectorById } from '@/utils/data';
@@ -27,6 +27,7 @@ import {
   savePickup,
   mergeRouteWithState,
   saveRouteState,
+  getRouteState,
   clearAllData,
   getTodayDropOff,
   saveDropOff,
@@ -39,6 +40,9 @@ import {
   getAdHocStopsForDate,
   saveAdHocStop,
   removeAdHocStop,
+  getRouteSplit,
+  saveRouteSplit,
+  clearRouteSplit,
   savePendingNote,
   getPendingNotes,
   markNoteSynced,
@@ -88,6 +92,23 @@ interface AppContextType {
   getStopStatus: (clientId: string) => RouteStop['status'];
   reorderStops: (oldIndex: number, newIndex: number) => void;
   applyStopOrder: (orderedClientIds: string[]) => void;
+
+  // Two-run split. splitState is null on an un-split day (the default) and every
+  // single-run code path keys off that.
+  splitState: RouteSplitState | null;
+  applySplit: (params: {
+    run1Ids: string[];
+    run2Ids: string[];
+    run1Endpoints: RunEndpoints;
+    run2Endpoints: RunEndpoints;
+    firstRun: 1 | 2;
+  }) => void;
+  setActiveRun: (run: 1 | 2) => void;
+  setFirstRun: (run: 1 | 2) => void;
+  clearSplit: () => void;
+  // Reorder just one run's stops, preserving the other run's positions.
+  applyRunOrder: (run: 1 | 2, orderedClientIds: string[]) => void;
+
   completeDropOff: (dropOff: DropOffRecord) => void;
   resetDay: () => void;
   completedCount: number;
@@ -141,6 +162,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Existing state
   const [collector, setCollector] = useState<Collector | null>(null);
   const [route, setRoute] = useState<Route | null>(null);
+  const [splitState, setSplitState] = useState<RouteSplitState | null>(null);
   const [pickups, setPickups] = useState<PickupRecord[]>([]);
   const [dropOff, setDropOff] = useState<DropOffRecord | null>(null);
 
@@ -433,11 +455,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         });
       }
 
-      // Apply saved route-state status to ad-hoc stops too (so completing one survives reload)
-      const savedStateStops = baseMerged.stops; // already merged above
+      // Apply saved route-state status to ad-hoc stops too (so completing one
+      // survives reload). Read from the full persisted route state rather than
+      // baseMerged.stops — on an all-ad-hoc day the sheet route is empty, so
+      // baseMerged wouldn't carry the ad-hoc stops' saved status or run tag.
+      const savedStateStops = getRouteState(newRoute.id) ?? baseMerged.stops;
       const adHocStopsWithSavedStatus = adHocStops.map(stop => {
         const saved = savedStateStops.find(s => s.client_id === stop.client_id);
-        return saved ? { ...stop, status: saved.status, notes: saved.notes } : stop;
+        // Preserve a previously-assigned run tag so ad-hoc stops survive a split.
+        return saved ? { ...stop, status: saved.status, notes: saved.notes, run: saved.run } : stop;
       });
 
       const mergedRoute: Route = {
@@ -447,6 +473,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       setSheetClients([...clients, ...adHocClients]);
       setRoute(mergedRoute);
+      setSplitState(getRouteSplit(mergedRoute.id));
       setSelectedDate(dateStr);
       setAvailableDates(getAvailableDates());
 
@@ -638,6 +665,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       notes: '',
       isAdHoc: true,
       adHocReason: reason,
+      // On a split day, drop the new stop into the run the driver is doing now.
+      ...(splitState?.enabled ? { run: splitState.activeRun } : {}),
     };
 
     const newStops = [...route.stops, newStop];
@@ -653,7 +682,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
 
     return true;
-  }, [route, selectedDate]);
+  }, [route, selectedDate, splitState]);
 
   // Save (or clear) a per-client manual lat/lng override. Optimistically
   // updates the open route so the optimiser sees the new coord without
@@ -760,6 +789,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       isAdHoc: true,
       adHocReason: info.reason,
       isNewLocation: true,
+      ...(splitState?.enabled ? { run: splitState.activeRun } : {}),
     };
 
     const newStops = [...(route?.stops ?? []), newStop];
@@ -782,7 +812,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
 
     return clientId;
-  }, [route, selectedDate]);
+  }, [route, selectedDate, splitState]);
 
   // Remove an ad-hoc stop from today's route (e.g. driver added by mistake)
   const removeAdHocStopFromRoute = useCallback((clientId: string) => {
@@ -905,6 +935,105 @@ export function AppProvider({ children }: { children: ReactNode }) {
     saveRouteState(route.id, repositioned);
   };
 
+  // Stamp the two-run split onto the route: tag each stop with its run, lay out
+  // run 1's stops first then run 2's (contiguous positions), persist both the
+  // stops and the split metadata. Any stop not in either ordered list (e.g.
+  // already-completed or unlocated) is parked in run 1 so it never disappears.
+  const applySplit = (params: {
+    run1Ids: string[];
+    run2Ids: string[];
+    run1Endpoints: RunEndpoints;
+    run2Endpoints: RunEndpoints;
+    firstRun: 1 | 2;
+  }) => {
+    if (!route) return;
+
+    const tag = new Map<string, { run: 1 | 2; order: number }>();
+    params.run1Ids.forEach((id, i) => tag.set(id, { run: 1, order: i }));
+    params.run2Ids.forEach((id, i) => tag.set(id, { run: 2, order: i }));
+
+    const withRun = route.stops.map(stop => {
+      const t = tag.get(stop.client_id);
+      if (t) return { ...stop, run: t.run };
+      // Untagged → park in run 1, keeping a high relative order so it trails.
+      return { ...stop, run: (stop.run ?? 1) as 1 | 2 };
+    });
+
+    const orderKey = (s: RouteStop) => tag.get(s.client_id)?.order ?? Number.MAX_SAFE_INTEGER;
+    const run1 = withRun.filter(s => s.run === 1).sort((a, b) => orderKey(a) - orderKey(b) || a.position - b.position);
+    const run2 = withRun.filter(s => s.run === 2).sort((a, b) => orderKey(a) - orderKey(b) || a.position - b.position);
+    const repositioned = [...run1, ...run2].map((s, i) => ({ ...s, position: i + 1 }));
+
+    setRoute({ ...route, stops: repositioned });
+    saveRouteState(route.id, repositioned);
+
+    const state: RouteSplitState = {
+      routeId: route.id,
+      enabled: true,
+      firstRun: params.firstRun,
+      activeRun: params.firstRun,
+      run1: params.run1Endpoints,
+      run2: params.run2Endpoints,
+    };
+    saveRouteSplit(state);
+    setSplitState(state);
+  };
+
+  const setActiveRun = (run: 1 | 2) => {
+    if (!route || !splitState) return;
+    const next = { ...splitState, activeRun: run };
+    saveRouteSplit(next);
+    setSplitState(next);
+  };
+
+  const setFirstRun = (run: 1 | 2) => {
+    if (!route || !splitState) return;
+    const next = { ...splitState, firstRun: run, activeRun: run };
+    saveRouteSplit(next);
+    setSplitState(next);
+  };
+
+  const clearSplit = () => {
+    if (!route) return;
+    const newStops = route.stops.map(s => {
+      if (s.run === undefined) return s;
+      const copy = { ...s };
+      delete copy.run;
+      return copy;
+    });
+    setRoute({ ...route, stops: newStops });
+    saveRouteState(route.id, newStops);
+    clearRouteSplit(route.id);
+    setSplitState(null);
+  };
+
+  // Reorder one run's stops while leaving the other run's positions untouched.
+  // The reordered stops reuse the same set of position "slots" they occupied, so
+  // the two runs stay non-overlapping.
+  const applyRunOrder = (run: 1 | 2, orderedClientIds: string[]) => {
+    if (!route) return;
+    const runStops = route.stops.filter(s => s.run === run);
+    if (runStops.length === 0) return;
+    const slots = runStops.map(s => s.position).sort((a, b) => a - b);
+
+    const ordered: RouteStop[] = [];
+    for (const id of orderedClientIds) {
+      const s = runStops.find(x => x.client_id === id);
+      if (s) ordered.push(s);
+    }
+    for (const s of runStops) {
+      if (!orderedClientIds.includes(s.client_id)) ordered.push(s);
+    }
+
+    const posById = new Map<string, number>();
+    ordered.forEach((s, i) => posById.set(s.client_id, slots[i]));
+    const newStops = route.stops.map(s =>
+      posById.has(s.client_id) ? { ...s, position: posById.get(s.client_id)! } : s
+    );
+    setRoute({ ...route, stops: newStops });
+    saveRouteState(route.id, newStops);
+  };
+
   const completedCount = route?.stops.filter(s => s.status === 'completed' || s.status === 'skipped').length || 0;
   const totalStops = route?.stops.length || 0;
   const allPickupsComplete = completedCount === totalStops && totalStops > 0;
@@ -925,6 +1054,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         getStopStatus,
         reorderStops,
         applyStopOrder,
+        splitState,
+        applySplit,
+        setActiveRun,
+        setFirstRun,
+        clearSplit,
+        applyRunOrder,
         completeDropOff,
         resetDay,
         completedCount,

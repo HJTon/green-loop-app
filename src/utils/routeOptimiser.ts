@@ -281,6 +281,53 @@ export function optimiseRouteByRoad(
   return { orderedIds: result.orderedIds, totalSeconds: result.total, totalMeters: meters };
 }
 
+// Subset optimisation over a shared road matrix. Unlike optimiseRouteByRoad
+// (which assumes the matrix is laid out as exactly [start, ...stops, end]), this
+// takes explicit matrix row indices for the start, the end, and an arbitrary
+// subset of stops. It's what powers the two-run split planner: one matrix is
+// fetched over the union of every point, then each run is optimised by handing
+// in just its own start/end/stop indices.
+export interface SubsetOptimiseResult {
+  // The supplied stop indices, reordered into the optimal visiting sequence.
+  orderedStopIdxs: number[];
+  totalSeconds: number;
+  totalMeters: number;
+}
+
+export function optimiseSubsetByRoad(
+  matrix: { durations: number[][]; distances: number[][] },
+  startIdx: number,
+  endIdx: number,
+  stopIdxs: number[]
+): SubsetOptimiseResult {
+  const n = stopIdxs.length;
+  if (n === 0) {
+    return {
+      orderedStopIdxs: [],
+      totalSeconds: matrix.durations[startIdx][endIdx],
+      totalMeters: matrix.distances[startIdx][endIdx],
+    };
+  }
+
+  // heldKarp keys purely by the position of each entry, so we can label the
+  // stops with their matrix indices and read them straight back out.
+  const ids = stopIdxs.map(String);
+  const startToStop = stopIdxs.map(s => matrix.durations[startIdx][s]);
+  const stopToEnd = stopIdxs.map(s => matrix.durations[s][endIdx]);
+  const between = stopIdxs.map(a => stopIdxs.map(b => matrix.durations[a][b]));
+
+  const result = heldKarp({ ids, startToStop, stopToEnd, between });
+  const orderedStopIdxs = result.orderedIds.map(Number);
+
+  let meters = matrix.distances[startIdx][orderedStopIdxs[0]];
+  for (let i = 1; i < orderedStopIdxs.length; i++) {
+    meters += matrix.distances[orderedStopIdxs[i - 1]][orderedStopIdxs[i]];
+  }
+  meters += matrix.distances[orderedStopIdxs[orderedStopIdxs.length - 1]][endIdx];
+
+  return { orderedStopIdxs, totalSeconds: result.total, totalMeters: meters };
+}
+
 // Total driving seconds + metres for an arbitrary given order (used to compute
 // the "current order" baseline for the savings display).
 export function roadCostForOrder(
