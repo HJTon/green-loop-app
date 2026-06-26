@@ -2,14 +2,15 @@ import { google } from 'googleapis';
 import { checkAuth, corsHeaders, preflightResponse } from './_lib/auth';
 
 // Upsert a row in the "Site Info" tab (created on first write), keyed by
-// business name. Columns: A Business Name | B Find Instructions | C Media URLs.
+// business name. Columns: A Business Name | B Find Instructions | C Media URLs | D Approach Note
 const TAB_NAME = 'Site Info';
-const HEADER = ['Business Name', 'Find Instructions', 'Media URLs'];
+const HEADER = ['Business Name', 'Find Instructions', 'Media URLs', 'Approach Note'];
 
 interface WriteRequest {
   businessName: string;
   instructions?: string;
   media?: string[];
+  approach_from?: string;
 }
 
 function getGoogleSheetsClient() {
@@ -35,7 +36,7 @@ async function ensureTab(sheets: Sheets, spreadsheetId: string): Promise<void> {
   });
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: `${TAB_NAME}!A1:C1`,
+    range: `${TAB_NAME}!A1:D1`,
     valueInputOption: 'RAW',
     requestBody: { values: [HEADER] },
   });
@@ -73,6 +74,7 @@ export default async (request: Request) => {
 
     const instructions = body.instructions || '';
     const media = (body.media || []).join('\n');
+    const approach_from = body.approach_from || '';
 
     const sheets = getGoogleSheetsClient();
     await ensureTab(sheets, spreadsheetId);
@@ -92,19 +94,19 @@ export default async (request: Request) => {
       }
     }
 
-    const rowValues = [businessName, instructions, media];
+    const rowValues = [businessName, instructions, media, approach_from];
 
     if (rowIndex > 0) {
       await sheets.spreadsheets.values.update({
         spreadsheetId,
-        range: `${TAB_NAME}!A${rowIndex}:C${rowIndex}`,
+        range: `${TAB_NAME}!A${rowIndex}:D${rowIndex}`,
         valueInputOption: 'RAW',
         requestBody: { values: [rowValues] },
       });
     } else {
       await sheets.spreadsheets.values.append({
         spreadsheetId,
-        range: `${TAB_NAME}!A:C`,
+        range: `${TAB_NAME}!A:D`,
         valueInputOption: 'RAW',
         insertDataOption: 'INSERT_ROWS',
         requestBody: { values: [rowValues] },

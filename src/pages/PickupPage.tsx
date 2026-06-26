@@ -6,6 +6,7 @@ import { Button } from '@/components/Button';
 import { FullnessSelector } from '@/components/FullnessSelector';
 import { PhotoSection } from '@/components/PhotoSection';
 import { FindBinsSection } from '@/components/FindBinsSection';
+import { ApproachSection } from '@/components/ApproachSection';
 import { LocationOverrideSection } from '@/components/LocationOverrideSection';
 import { ReportSection } from '@/components/ReportSection';
 import { SerialNumberModal } from '@/components/consolidation/SerialNumberModal';
@@ -414,11 +415,20 @@ export function PickupPage() {
               <span className="text-sm text-amber-800">{client.delivery_notes}</span>
             </div>
           )}
+          <ApproachSection
+            approachFrom={client.approach_from}
+            collectionType={client.collection_type}
+            onSave={approachFrom => saveSiteInfo(client.id, {
+              instructions: client.find_instructions || '',
+              media: client.find_media || [],
+              approach_from: approachFrom,
+            })}
+          />
           <FindBinsSection
             businessName={client.business_name}
             instructions={client.find_instructions}
             media={client.find_media}
-            onSave={data => saveSiteInfo(client.id, data)}
+            onSave={data => saveSiteInfo(client.id, { ...data, approach_from: client.approach_from || '' })}
           />
           {!isNewLocation && (
             <LocationOverrideSection
@@ -523,11 +533,20 @@ export function PickupPage() {
             <span className="text-sm text-amber-800">{client.delivery_notes}</span>
           </div>
         )}
+        <ApproachSection
+          approachFrom={client.approach_from}
+          collectionType={client.collection_type}
+          onSave={approachFrom => saveSiteInfo(client.id, {
+            instructions: client.find_instructions || '',
+            media: client.find_media || [],
+            approach_from: approachFrom,
+          })}
+        />
         <FindBinsSection
           businessName={client.business_name}
           instructions={client.find_instructions}
           media={client.find_media}
-          onSave={data => saveSiteInfo(client.id, data)}
+          onSave={data => saveSiteInfo(client.id, { ...data, approach_from: client.approach_from || '' })}
         />
         {!isNewLocation && (
           <LocationOverrideSection

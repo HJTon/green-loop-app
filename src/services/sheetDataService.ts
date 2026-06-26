@@ -46,7 +46,7 @@ let cachedDateColumns: DateColumn[] | null = null;
 let cachedHeaders: string[] | null = null;
 
 // Per-site "how to find the bins" help, keyed by normalised business name.
-interface SiteInfo { instructions: string; media: string[]; }
+interface SiteInfo { instructions: string; media: string[]; approach_from: string; }
 let cachedSiteInfo: Map<string, SiteInfo> = new Map();
 
 function siteInfoKey(businessName: string): string {
@@ -167,7 +167,8 @@ async function loadSiteInfo(): Promise<void> {
         .split(/[\n,]+/)
         .map(s => s.trim())
         .filter(Boolean);
-      cachedSiteInfo.set(siteInfoKey(name), { instructions, media });
+      const approach_from = rows[i]?.[3] || '';
+      cachedSiteInfo.set(siteInfoKey(name), { instructions, media, approach_from });
     }
     console.log(`Loaded site info for ${cachedSiteInfo.size} site(s)`);
   } catch (error) {
@@ -179,7 +180,7 @@ async function loadSiteInfo(): Promise<void> {
  * Look up cached site info for a business name (empty if none recorded).
  */
 function getSiteInfoFor(businessName: string): SiteInfo {
-  return cachedSiteInfo.get(siteInfoKey(businessName)) || { instructions: '', media: [] };
+  return cachedSiteInfo.get(siteInfoKey(businessName)) || { instructions: '', media: [], approach_from: '' };
 }
 
 /**
@@ -189,20 +190,21 @@ function getSiteInfoFor(businessName: string): SiteInfo {
 export async function writeSiteInfo(
   businessName: string,
   instructions: string,
-  media: string[]
+  media: string[],
+  approach_from: string
 ): Promise<void> {
   // Optimistically update the cache regardless of environment.
-  cachedSiteInfo.set(siteInfoKey(businessName), { instructions, media });
+  cachedSiteInfo.set(siteInfoKey(businessName), { instructions, media, approach_from });
 
   if (!isProduction()) {
-    console.log('[DEV MODE] Would write Site Info for', businessName, { instructions, media });
+    console.log('[DEV MODE] Would write Site Info for', businessName, { instructions, media, approach_from });
     return;
   }
 
   const response = await apiFetch('/.netlify/functions/site-info-write', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ businessName, instructions, media }),
+    body: JSON.stringify({ businessName, instructions, media, approach_from }),
   });
 
   if (!response.ok) {
@@ -489,6 +491,7 @@ export function transformToClient(pickup: SheetPickup): Client {
     active: true,
     find_instructions: site.instructions,
     find_media: site.media,
+    approach_from: site.approach_from,
     start_date: pickup.startDate,
     is_first_visit: pickup.isFirstVisit,
     manual_lat: override.lat,
@@ -619,6 +622,7 @@ export function getAllClients(): Client[] {
       active: true,
       find_instructions: site.instructions,
       find_media: site.media,
+      approach_from: site.approach_from,
       manual_lat: row.manualLat,
       manual_lng: row.manualLng,
     };

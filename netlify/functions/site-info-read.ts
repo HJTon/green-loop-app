@@ -2,7 +2,7 @@ import { google } from 'googleapis';
 import { checkAuth, corsHeaders, preflightResponse } from './_lib/auth';
 
 // The "Site Info" tab holds driver-editable per-site help, keyed by business name:
-//   A: Business Name | B: Find Instructions | C: Media URLs (newline/comma separated)
+//   A: Business Name | B: Find Instructions | C: Media URLs | D: Approach Note
 const TAB_NAME = 'Site Info';
 
 function getGoogleSheetsClient() {
@@ -34,7 +34,7 @@ export default async (request: Request) => {
     try {
       const response = await sheets.spreadsheets.values.get({
         spreadsheetId,
-        range: TAB_NAME,
+        range: `${TAB_NAME}!A:D`,
       });
       rows = (response.data.values as string[][]) || [];
     } catch (err) {

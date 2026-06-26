@@ -34,6 +34,8 @@ export interface Client {
   // "How to find the bins" — driver-editable help stored in the Site Info tab.
   find_instructions?: string;
   find_media?: string[];        // media-serve URLs (photos / short videos)
+  // Approach note — which side of the block / street to enter from.
+  approach_from?: string;
   // Onboarding: the business's Start Date (raw sheet value, column H) and a
   // derived flag for whether *this* route date is their first scheduled visit —
   // i.e. the visit where the collector hands over the welcome kit.

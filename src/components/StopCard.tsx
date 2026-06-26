@@ -1,4 +1,4 @@
-import { MapPin, Trash2, Check, SkipForward, GripVertical, Zap, Sprout, Camera, MapPinOff, RefreshCw, MapPinned } from 'lucide-react';
+import { MapPin, Trash2, Check, SkipForward, GripVertical, Zap, Sprout, Camera, MapPinOff, RefreshCw, MapPinned, Navigation2 } from 'lucide-react';
 import { useState } from 'react';
 import type { Client, RouteStop, AdHocReason } from '@/types';
 
@@ -169,6 +169,12 @@ export function StopCard({ stop, client, onClick, dragHandleProps, isDragging, d
             </div>
           </div>
 
+          {client.approach_from && (
+            <div className="flex items-start gap-1.5 mt-2 pl-11">
+              <Navigation2 size={13} className="text-sky-600 shrink-0 mt-0.5" />
+              <p className="text-xs text-sky-800 leading-snug">{client.approach_from}</p>
+            </div>
+          )}
           {stop.notes && (
             <p className="text-xs text-gray-500 mt-2 pl-11 italic">{stop.notes}</p>
           )}

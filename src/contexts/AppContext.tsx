@@ -149,8 +149,8 @@ interface AppContextType {
   }) => string;
   removeAdHocStopFromRoute: (clientId: string) => void;
 
-  // "How to find the bins" per-site help (editable in the field)
-  saveSiteInfo: (clientId: string, data: { instructions: string; media: string[] }) => Promise<void>;
+  // "How to find the bins" + approach note per-site help (editable in the field)
+  saveSiteInfo: (clientId: string, data: { instructions: string; media: string[]; approach_from: string }) => Promise<void>;
   // Manual lat/lng override for stops the geocoder can't place. Pass null/null
   // to clear an existing override. Persists to columns N/O on the sheet.
   saveClientLocationOverride: (clientId: string, lat: number | null, lng: number | null) => Promise<void>;
@@ -728,20 +728,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // open page reflects it immediately, then persists to the Site Info tab.
   const saveSiteInfo = useCallback(async (
     clientId: string,
-    data: { instructions: string; media: string[] }
+    data: { instructions: string; media: string[]; approach_from: string }
   ) => {
     const client = sheetClients.find(c => c.id === clientId);
     if (!client) return;
 
     setSheetClients(prev => prev.map(c =>
       c.id === clientId
-        ? { ...c, find_instructions: data.instructions, find_media: data.media }
+        ? { ...c, find_instructions: data.instructions, find_media: data.media, approach_from: data.approach_from }
         : c
     ));
 
     try {
-      await writeSiteInfo(client.business_name, data.instructions, data.media);
-      addToast('success', 'Saved how to find the bins');
+      await writeSiteInfo(client.business_name, data.instructions, data.media, data.approach_from);
+      addToast('success', 'Site info saved');
     } catch (error) {
       console.error('Failed to save site info:', error);
       addToast('error', "Couldn't save to sheet - your changes are kept on this device");
