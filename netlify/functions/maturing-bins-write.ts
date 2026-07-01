@@ -1,5 +1,6 @@
 import type { Context } from '@netlify/functions';
 import { google } from 'googleapis';
+import { checkAuth, corsHeaders, preflightResponse } from './_lib/auth';
 
 interface MaturingBinContent {
   id: string;
@@ -52,16 +53,9 @@ function formatDate(dateStr: string): string {
 
 export default async (request: Request, context: Context) => {
   // Handle CORS preflight
-  if (request.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-      },
-    });
-  }
+  if (request.method === 'OPTIONS') return preflightResponse();
+  const authFail = checkAuth(request);
+  if (authFail) return authFail;
 
   if (request.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
@@ -92,31 +86,29 @@ export default async (request: Request, context: Context) => {
 
     const sheets = getGoogleSheetsClient();
 
-    // Extract unique business names for locations (up to 3)
+    // Extract unique business names for locations (up to 5)
     const uniqueBusinessNames = [...new Set(bin.contents.map(c => c.businessName))];
-    const location1 = uniqueBusinessNames[0] || '';
-    const location2 = uniqueBusinessNames[1] || '';
-    const location3 = uniqueBusinessNames[2] || '';
+    const sources = [0, 1, 2, 3, 4].map(i => uniqueBusinessNames[i] || '');
 
-    // Prepare row data to match existing Bin Tracker columns:
+    // Prepare row data to match current Bin Tracker columns (updated 2026-04-21):
     // A: Date of collection
-    // B: Location 1 (business name)
-    // C: Location 2 (business name)
-    // D: Location 3 (business name)
-    // E: Bin number (serial number)
-    // F onwards: Left blank - sheet calculates maturing date, colour/batch assigned later
+    // B–F: Content from (sources 1–5)
+    // G: Number (bin serial)
+    // H onwards: Left blank — colour / maturation / batching filled in later
     const rowData = [
-      formatDate(bin.createdDate),      // A: Date of collection
-      location1,                         // B: Location 1
-      location2,                         // C: Location 2
-      location3,                         // D: Location 3
-      bin.serialNumber,                  // E: Bin number
+      formatDate(bin.createdDate),
+      sources[0],
+      sources[1],
+      sources[2],
+      sources[3],
+      sources[4],
+      bin.serialNumber,
     ];
 
     // Append the row to the Bin Tracker sheet
     await sheets.spreadsheets.values.append({
       spreadsheetId,
-      range: 'Bin Tracker!A:E',
+      range: 'Bin Tracker!A:G',
       valueInputOption: 'USER_ENTERED',
       insertDataOption: 'INSERT_ROWS',
       requestBody: {
@@ -130,10 +122,7 @@ export default async (request: Request, context: Context) => {
       serialNumber: bin.serialNumber,
     }), {
       status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-      },
+      headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
     });
   } catch (error) {
     console.error('Error writing to maturing bins sheet:', error);
@@ -142,10 +131,7 @@ export default async (request: Request, context: Context) => {
       details: error instanceof Error ? error.message : 'Unknown error',
     }), {
       status: 500,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-      },
+      headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
     });
   }
 };

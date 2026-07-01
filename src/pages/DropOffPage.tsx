@@ -22,7 +22,7 @@ import { ConsolidationProgress } from '@/components/consolidation/ConsolidationP
 import { SerialNumberModal } from '@/components/consolidation/SerialNumberModal';
 import { useApp } from '@/contexts/AppContext';
 import { getFarmById } from '@/utils/data';
-import { sendReportEmail } from '@/services/emailService';
+import { apiFetch } from '@/utils/apiClient';
 import {
   generateId,
   getCurrentDate,
@@ -69,7 +69,7 @@ function NewMaturingBinZone() {
 
 export function DropOffPage() {
   const navigate = useNavigate();
-  const { collector, route, pickups, dropOff, completeDropOff, sheetClients, addToast } = useApp();
+  const { collector, route, pickups, dropOff, completeDropOff, sheetClients, addToast, queueEmailSend } = useApp();
 
   const farm = route?.destination_farm_id ? getFarmById(route.destination_farm_id) : undefined;
 
@@ -357,7 +357,7 @@ export function DropOffPage() {
     try {
       // Export each bin to the maturing bins spreadsheet
       for (const bin of session.maturingBins) {
-        const response = await fetch('/.netlify/functions/maturing-bins-write', {
+        const response = await apiFetch('/.netlify/functions/maturing-bins-write', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -395,9 +395,9 @@ export function DropOffPage() {
 
       completeDropOff(newDropOff);
 
-      // Send email notification if there's a report
+      // Queue report email if there's a report (offline-resilient)
       if (newDropOff.report && newDropOff.report.issue) {
-        sendReportEmail({
+        queueEmailSend({
           businessName: farm.farm_name,
           collectorName: collector.name,
           reportType: 'dropoff',

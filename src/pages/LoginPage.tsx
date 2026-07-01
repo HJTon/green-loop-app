@@ -15,7 +15,7 @@ export function LoginPage() {
 
     if (collector) {
       login(collector);
-      navigate('/route');
+      navigate('/load-van');
     } else {
       setError('Invalid PIN');
       // Clear error after animation

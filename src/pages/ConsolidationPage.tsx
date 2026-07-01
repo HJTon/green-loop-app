@@ -21,6 +21,7 @@ import { ConsolidationProgress } from '@/components/consolidation/ConsolidationP
 import { SerialNumberModal } from '@/components/consolidation/SerialNumberModal';
 import { useApp } from '@/contexts/AppContext';
 import { getFarmById } from '@/utils/data';
+import { apiFetch } from '@/utils/apiClient';
 import type { PickupTile, ConsolidationSession } from '@/types';
 import {
   createPickupTilesFromPickups,
@@ -253,7 +254,7 @@ export function ConsolidationPage() {
     try {
       // Export each bin to the maturing bins spreadsheet
       for (const bin of session.maturingBins) {
-        const response = await fetch('/.netlify/functions/maturing-bins-write', {
+        const response = await apiFetch('/.netlify/functions/maturing-bins-write', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -302,54 +303,19 @@ export function ConsolidationPage() {
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <div className="p-4">
-          {/* Two-column layout on larger screens */}
-          <div className="lg:flex lg:gap-6">
-            {/* Left side: Unassigned Pickups */}
-            <div className="lg:w-1/2 mb-6 lg:mb-0">
-              <div className="flex items-baseline justify-between mb-3">
-                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">
-                  Unassigned Pickups ({unassignedTiles.length})
-                </h3>
-                {unassignedTiles.length > 0 && (
-                  <span className="text-xs text-gray-400">Tap to select · drag to place</span>
-                )}
-              </div>
-
-              {!hasPickups ? (
-                <div className="bg-gray-50 border-2 border-gray-200 rounded-xl p-6 text-center">
-                  <Truck size={32} className="text-gray-400 mx-auto mb-2" />
-                  <p className="text-gray-600 font-medium">No pickups completed yet</p>
-                  <p className="text-sm text-gray-500 mt-1">
-                    Complete pickups on the route, then assign them to bins here
-                  </p>
-                </div>
-              ) : unassignedTiles.length === 0 ? (
-                <div className="bg-green-50 border-2 border-green-200 rounded-xl p-6 text-center">
-                  <Truck size={32} className="text-green-primary mx-auto mb-2" />
-                  <p className="text-green-800 font-medium">All pickups assigned!</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {unassignedTiles.map(tile => (
-                    <DraggablePickupTile
-                      key={tile.id}
-                      tile={tile}
-                      isSelected={selectedTileId === tile.id}
-                      onSelect={() => handleTileSelect(tile.id)}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Right side: Maturing Bins */}
-            <div className="lg:w-1/2">
-              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                Maturing Bins ({session.maturingBins.length})
+        <div className="p-3">
+          {/* Two-column layout: bins left, pickups right */}
+          <div className="flex gap-2 items-start">
+            {/* Left: Maturing Bins */}
+            <div className="w-[44%] shrink-0">
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                Bins ({session.maturingBins.length})
               </h3>
 
-              <div className="space-y-3">
+              <div
+                className="space-y-2 overflow-y-auto"
+                style={{ maxHeight: 'calc(100dvh - 220px)' }}
+              >
                 {session.maturingBins.map(bin => (
                   <MaturingBinDropZone
                     key={bin.id}
@@ -359,6 +325,7 @@ export function ConsolidationPage() {
                   >
                     <MaturingBinCard
                       bin={bin}
+                      compact
                       onRemoveContent={pickupTileId =>
                         handleRemoveFromBin(bin.id, pickupTileId)
                       }
@@ -370,35 +337,75 @@ export function ConsolidationPage() {
                 {/* Add bin button */}
                 <button
                   onClick={() => setShowSerialModal(true)}
-                  className="w-full p-4 rounded-xl border-2 border-dashed border-gray-300 text-gray-500 hover:border-green-primary hover:text-green-primary hover:bg-green-50 transition-colors flex items-center justify-center gap-2"
+                  className="w-full py-3 rounded-xl border-2 border-dashed border-gray-300 text-gray-500 hover:border-green-primary hover:text-green-primary hover:bg-green-50 transition-colors flex items-center justify-center gap-1 text-sm"
                 >
-                  <Plus size={20} />
-                  <span>Add Maturing Bin</span>
+                  <Plus size={16} />
+                  <span>Add Bin</span>
                 </button>
+              </div>
+            </div>
+
+            {/* Right: Unassigned Pickups */}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-baseline justify-between mb-2">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  Pickups ({unassignedTiles.length})
+                </h3>
+                {unassignedTiles.length > 0 && (
+                  <span className="text-xs text-gray-400">Tap to select</span>
+                )}
+              </div>
+
+              <div
+                className="overflow-y-auto"
+                style={{ maxHeight: 'calc(100dvh - 220px)' }}
+              >
+                {!hasPickups ? (
+                  <div className="bg-gray-50 border-2 border-gray-200 rounded-xl p-4 text-center">
+                    <Truck size={24} className="text-gray-400 mx-auto mb-2" />
+                    <p className="text-gray-600 font-medium text-sm">No pickups yet</p>
+                  </div>
+                ) : unassignedTiles.length === 0 ? (
+                  <div className="bg-green-50 border-2 border-green-200 rounded-xl p-4 text-center">
+                    <Truck size={24} className="text-green-primary mx-auto mb-2" />
+                    <p className="text-green-800 font-medium text-sm">All assigned!</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {unassignedTiles.map(tile => (
+                      <DraggablePickupTile
+                        key={tile.id}
+                        tile={tile}
+                        isSelected={selectedTileId === tile.id}
+                        onSelect={() => handleTileSelect(tile.id)}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
 
           {/* Status messages */}
           {!hasPickups && (
-            <div className="mt-6 flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
-              <AlertCircle size={18} className="text-blue-600 mt-0.5 shrink-0" />
-              <p className="text-sm text-blue-800">
-                Complete pickups on the route first. You can add maturing bins here while you wait.
+            <div className="mt-4 flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+              <AlertCircle size={16} className="text-blue-600 mt-0.5 shrink-0" />
+              <p className="text-xs text-blue-800">
+                Complete pickups on the route first. You can add bins here while you wait.
               </p>
             </div>
           )}
           {hasPickups && session.maturingBins.length === 0 && (
-            <div className="mt-6 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
-              <AlertCircle size={18} className="text-amber-600 mt-0.5 shrink-0" />
-              <p className="text-sm text-amber-800">
-                Add at least one maturing bin and assign all pickups to complete consolidation.
+            <div className="mt-4 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              <AlertCircle size={16} className="text-amber-600 mt-0.5 shrink-0" />
+              <p className="text-xs text-amber-800">
+                Add at least one maturing bin and assign all pickups to complete.
               </p>
             </div>
           )}
 
           {/* Complete button */}
-          <div className="mt-8">
+          <div className="mt-4">
             <Button
               fullWidth
               size="lg"

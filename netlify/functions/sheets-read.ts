@@ -1,5 +1,6 @@
 import type { Context } from '@netlify/functions';
 import { google } from 'googleapis';
+import { checkAuth, corsHeaders, preflightResponse } from './_lib/auth';
 
 // Initialize Google Sheets API with service account credentials
 function getGoogleSheetsClient() {
@@ -16,15 +17,11 @@ function getGoogleSheetsClient() {
 export default async (request: Request, context: Context) => {
   // Handle CORS preflight
   if (request.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-      },
-    });
+    return preflightResponse();
   }
+
+  const authFail = checkAuth(request);
+  if (authFail) return authFail;
 
   try {
     const spreadsheetId = process.env.GOOGLE_SPREADSHEET_ID;
@@ -38,10 +35,15 @@ export default async (request: Request, context: Context) => {
 
     const sheets = getGoogleSheetsClient();
 
+    const url = new URL(request.url);
+    const render = url.searchParams.get('render');
+    const tab = url.searchParams.get('tab') || 'invoicing';
+
     // Read the entire sheet (all columns)
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'invoicing', // The sheet tab name
+      range: tab,
+      valueRenderOption: render === 'formula' ? 'FORMULA' : undefined,
     });
 
     const rows = response.data.values || [];
@@ -52,10 +54,7 @@ export default async (request: Request, context: Context) => {
       rowCount: rows.length,
     }), {
       status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-      },
+      headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
     });
   } catch (error) {
     console.error('Error reading sheet:', error);
@@ -64,10 +63,7 @@ export default async (request: Request, context: Context) => {
       details: error instanceof Error ? error.message : 'Unknown error',
     }), {
       status: 500,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-      },
+      headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
     });
   }
 };

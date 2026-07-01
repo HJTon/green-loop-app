@@ -55,6 +55,7 @@ export function ConfirmationPage() {
   };
 
   const unitName = client.collection_type === 'bins' ? 'bins' : 'buckets';
+  const isSoil = client.collection_type === 'soil';
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-green-50 to-white flex flex-col items-center justify-center px-4">
@@ -73,18 +74,27 @@ export function ConfirmationPage() {
             <span className="text-gray-600">Business</span>
             <span className="font-semibold text-gray-900">{client.business_name}</span>
           </div>
-          <div className="flex justify-between">
-            <span className="text-gray-600">Collected</span>
-            <span className="font-semibold text-gray-900">
-              {pickup.bins_collected} {unitName}
-            </span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-gray-600">Fullness</span>
-            <span className="font-semibold text-gray-900">
-              {pickup.bin_fullness.join(', ')}
-            </span>
-          </div>
+          {isSoil ? (
+            <div className="flex justify-between">
+              <span className="text-gray-600">Soil / green-waste</span>
+              <span className="font-semibold text-gray-900">Dropped at community garden</span>
+            </div>
+          ) : (
+            <>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Collected</span>
+                <span className="font-semibold text-gray-900">
+                  {pickup.bins_collected} {unitName}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Fullness</span>
+                <span className="font-semibold text-gray-900">
+                  {pickup.bin_fullness.join(', ')}
+                </span>
+              </div>
+            </>
+          )}
           {pickup.notes && (
             <div className="pt-2 border-t border-gray-100">
               <span className="text-gray-600 text-sm">Notes: </span>
