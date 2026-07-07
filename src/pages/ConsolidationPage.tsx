@@ -21,7 +21,6 @@ import { ConsolidationProgress } from '@/components/consolidation/ConsolidationP
 import { SerialNumberModal } from '@/components/consolidation/SerialNumberModal';
 import { useApp } from '@/contexts/AppContext';
 import { getFarmById } from '@/utils/data';
-import { apiFetch } from '@/utils/apiClient';
 import type { PickupTile, ConsolidationSession } from '@/types';
 import {
   createPickupTilesFromPickups,
@@ -41,7 +40,7 @@ import {
 
 export function ConsolidationPage() {
   const navigate = useNavigate();
-  const { collector, route, pickups, sheetClients, addToast } = useApp();
+  const { collector, route, pickups, sheetClients, addToast, queueMaturingBinWrite } = useApp();
 
   const [session, setSession] = useState<ConsolidationSession | null>(null);
   const [showSerialModal, setShowSerialModal] = useState(false);
@@ -252,21 +251,20 @@ export function ConsolidationPage() {
     setIsExporting(true);
 
     try {
-      // Export each bin to the maturing bins spreadsheet
+      // Export each bin to the maturing bins sheet. queueMaturingBinWrite
+      // returns true when the POST landed, false when it fell through to the
+      // offline queue — either way we mark the session complete and let the
+      // AppContext retry loop drain any queued writes on next boot / manual
+      // sync. The count of queued writes drives the copy on the toast.
+      let sentCount = 0;
+      let queuedCount = 0;
       for (const bin of session.maturingBins) {
-        const response = await apiFetch('/.netlify/functions/maturing-bins-write', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            bin,
-            collectorName: collector.name,
-            farmName: farm?.farm_name || 'Unknown Farm',
-          }),
+        const ok = await queueMaturingBinWrite({
+          bin,
+          collectorName: collector.name,
+          farmName: farm?.farm_name || 'Unknown Farm',
         });
-
-        if (!response.ok) {
-          throw new Error(`Failed to export bin ${bin.serialNumber}`);
-        }
+        if (ok) sentCount++; else queuedCount++;
       }
 
       // Mark session as completed
@@ -276,12 +274,13 @@ export function ConsolidationPage() {
       };
       saveConsolidation(completedSession);
 
-      addToast('success', `Exported ${session.maturingBins.length} bin(s) to maturing sheet`);
-      navigate('/dropoff');
-    } catch (error) {
-      console.error('Export error:', error);
-      addToast('error', 'Failed to export. Will retry when you complete drop-off.');
-      // Still allow navigation to drop-off
+      if (queuedCount === 0) {
+        addToast('success', `Exported ${sentCount} bin(s) to maturing sheet`);
+      } else if (sentCount === 0) {
+        addToast('info', `Saved ${queuedCount} bin(s) locally — will retry when you're back online`);
+      } else {
+        addToast('info', `Sent ${sentCount}, saved ${queuedCount} locally — the rest will retry when you're back online`);
+      }
       navigate('/dropoff');
     } finally {
       setIsExporting(false);

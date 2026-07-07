@@ -25,7 +25,7 @@ import { DatePickerModal } from '@/components/DatePickerModal';
 import { OptimiseRouteModal } from '@/components/OptimiseRouteModal';
 import { useApp } from '@/contexts/AppContext';
 import { getFarmById } from '@/utils/data';
-import { getCurrentDate } from '@/utils/storage';
+import { getCurrentDate, getUnconsolidatedOldPickups } from '@/utils/storage';
 import {
   MapPin, Trophy, Truck, Calendar, AlertCircle, ArrowLeft, RefreshCw, Package,
   Loader2, Navigation, Sparkles, Settings, Split,
@@ -94,11 +94,23 @@ export function RouteListPage() {
     splitState,
     setActiveRun,
     applyRunOrder,
+    hasPendingMaturingBins,
   } = useApp();
 
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showOptimiser, setShowOptimiser] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // "Unconsolidated bins from earlier trips" nudge. Recomputed on every render
+  // (cheap — just a filter over localStorage). Two separate counts drive the
+  // banner copy: how many earlier-day pickups never made it through
+  // Consolidation, plus how many maturing-bin writes are queued for retry.
+  const unconsolidatedOldPickups = getUnconsolidatedOldPickups();
+  const unconsolidatedBinCount = unconsolidatedOldPickups.reduce(
+    (n, p) => n + (p.bins_collected || 0), 0
+  );
+  const hasPendingBinWrites = hasPendingMaturingBins();
+  const showUnconsolidatedNudge = unconsolidatedBinCount > 0 || hasPendingBinWrites;
 
   // Endpoint selection — defaults to the only Envirohub start and the route's
   // assigned destination farm. Can be overridden via the settings modal.
@@ -378,6 +390,46 @@ export function RouteListPage() {
               <ArrowLeft size={16} className="mr-1" />
               Today
             </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Unconsolidated bins nudge — completed pickups from earlier days that
+          never made it through Consolidation, plus any maturing-bin writes
+          still sitting in the offline retry queue. Amber (warning), not red:
+          it's a "you missed a step", not a crisis. Also linked to the on-phone
+          recovery screen in case Joe needs to pull the raw data. */}
+      {!isReadOnlyView && showUnconsolidatedNudge && (
+        <div className="bg-amber-50 px-4 py-3 border-b border-amber-200">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="text-amber-600 mt-0.5 shrink-0" size={18} />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-amber-900">
+                {unconsolidatedBinCount > 0 && (
+                  <>
+                    {unconsolidatedBinCount} bin{unconsolidatedBinCount === 1 ? '' : 's'} from earlier trips haven&apos;t been sent to the compost monitor yet.
+                  </>
+                )}
+                {unconsolidatedBinCount > 0 && hasPendingBinWrites && ' '}
+                {hasPendingBinWrites && (
+                  <>Some bin writes are waiting to send &mdash; they&apos;ll retry when you&apos;re back online.</>
+                )}
+              </p>
+              <div className="flex flex-wrap items-center gap-3 mt-2">
+                {unconsolidatedBinCount > 0 && (
+                  <Button size="sm" onClick={() => navigate('/consolidation')}>
+                    Go to Consolidation
+                  </Button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => navigate('/debug/export')}
+                  className="text-xs font-semibold text-amber-800 underline"
+                >
+                  Recovery / export data
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -719,7 +771,6 @@ function OptimisationBanner({
 }: BannerProps) {
   if (status === 'idle') return null;
 
- 
   const Wrap = ({ children, tone }: { children: React.ReactNode; tone: 'info' | 'success' | 'warn' }) => {
     const colors =
       tone === 'success'

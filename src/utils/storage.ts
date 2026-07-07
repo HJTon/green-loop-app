@@ -8,6 +8,7 @@ const DROPOFF_KEY = 'greenloop_dropoff';
 const PENDING_WRITES_KEY = 'greenloop_pending_writes';
 const PENDING_NOTES_KEY = 'greenloop_pending_notes';
 const PENDING_EMAILS_KEY = 'greenloop_pending_emails';
+const PENDING_MATURING_BINS_KEY = 'greenloop_pending_maturing_bins';
 const CONSOLIDATION_KEY = 'greenloop_consolidation';
 const MATURING_BINS_KEY = 'greenloop_maturing_bins';
 const ADHOC_STOPS_KEY = 'greenloop_adhoc_stops'; // keyed by date inside the JSON object
@@ -47,6 +48,17 @@ export interface PendingEmailSend {
   photos: string[];
   recipients: ReportRecipient[];
   timestamp: string;
+}
+
+// Pending maturing-bin appends to the Bin Tracker tab. Same shape the
+// `maturing-bins-write` Netlify function already takes as its body — we just
+// stash it verbatim so the retry loop can POST it as-is.
+export interface PendingMaturingBinWrite {
+  id: string;
+  bin: MaturingBin;
+  collectorName: string;
+  farmName: string;
+  createdAt: string; // ISO — TTL / debugging
 }
 
 // A brand-new location added in the field that ISN'T in the schedule sheet.
@@ -360,6 +372,64 @@ export function markEmailSynced(id: string): void {
 
 export function clearAllPendingEmails(): void {
   localStorage.removeItem(PENDING_EMAILS_KEY);
+}
+
+// Pending maturing-bin writes (for the "Bin Tracker" tab of the maturing-bins
+// sheet). Same offline-then-retry pattern as writes / notes / emails above.
+export function savePendingMaturingBin(entry: PendingMaturingBinWrite): void {
+  const entries = getPendingMaturingBins();
+  const existingIndex = entries.findIndex(e => e.id === entry.id);
+  if (existingIndex >= 0) {
+    entries[existingIndex] = entry;
+  } else {
+    entries.push(entry);
+  }
+  localStorage.setItem(PENDING_MATURING_BINS_KEY, JSON.stringify(entries));
+}
+
+export function getPendingMaturingBins(): PendingMaturingBinWrite[] {
+  const data = localStorage.getItem(PENDING_MATURING_BINS_KEY);
+  if (!data) return [];
+  try {
+    return JSON.parse(data);
+  } catch {
+    return [];
+  }
+}
+
+export function markMaturingBinSynced(id: string): void {
+  const entries = getPendingMaturingBins().filter(e => e.id !== id);
+  localStorage.setItem(PENDING_MATURING_BINS_KEY, JSON.stringify(entries));
+}
+
+export function clearAllPendingMaturingBins(): void {
+  localStorage.removeItem(PENDING_MATURING_BINS_KEY);
+}
+
+// Selector for UI nudges — is there anything queued that hasn't landed yet?
+export function hasPendingMaturingBins(): boolean {
+  return getPendingMaturingBins().length > 0;
+}
+
+// Find completed pickups from earlier days that never made it through
+// Consolidation. We only store one consolidation session at a time, so
+// "consolidated" means: the currently stored session matches that pickup's
+// date AND has completedAt set. Anything older than that (or from a different
+// date) is treated as unsent to the compost monitor. Used by the route list
+// banner to nudge the driver to open /consolidation and finish the job.
+export function getUnconsolidatedOldPickups(): PickupRecord[] {
+  const today = getCurrentDate();
+  const consolidation = getConsolidation();
+  const consolidatedDate =
+    consolidation && consolidation.completedAt ? consolidation.date : null;
+
+  return getPickups().filter(p => {
+    if (p.status !== 'completed') return false;
+    if (p.date >= today) return false; // today or future — not a "missed" day
+    // If the one stored consolidation session matches this pickup's date and
+    // is completed, treat as sent. Otherwise it's a candidate for the nudge.
+    return p.date !== consolidatedDate;
+  });
 }
 
 // Consolidation session management

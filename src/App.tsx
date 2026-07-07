@@ -12,6 +12,7 @@ import { AddPickupPage } from '@/pages/AddPickupPage';
 import { LoadVanPage } from '@/pages/LoadVanPage';
 import { SplitPlannerPage } from '@/pages/SplitPlannerPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { DebugExportPage } from '@/pages/DebugExportPage';
 
 function AppRoutes() {
   const { toasts, dismissToast } = useApp();
@@ -30,6 +31,7 @@ function AppRoutes() {
         <Route path="/dropoff" element={<DropOffPage />} />
         <Route path="/summary" element={<SummaryPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/debug/export" element={<DebugExportPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />

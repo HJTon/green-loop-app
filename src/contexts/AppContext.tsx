@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
-import type { Collector, Route, PickupRecord, RouteStop, RouteSplitState, RunEndpoints, DropOffRecord, Client, AdHocReason, PickupReport, CollectionType } from '@/types';
+import type { Collector, Route, PickupRecord, RouteStop, RouteSplitState, RunEndpoints, DropOffRecord, Client, AdHocReason, PickupReport, CollectionType, MaturingBin } from '@/types';
 import type { PendingWrite } from '@/types/sheet';
 import type { ToastMessage } from '@/components/Toast';
 import { getCollectorById } from '@/utils/data';
@@ -19,6 +19,7 @@ import {
   writeManualOverride,
 } from '@/services/sheetDataService';
 import { sendReportEmail } from '@/services/emailService';
+import { apiFetch } from '@/utils/apiClient';
 import {
   getSession,
   saveSession,
@@ -51,6 +52,11 @@ import {
   getPendingEmails,
   markEmailSynced,
   clearAllPendingEmails,
+  savePendingMaturingBin,
+  getPendingMaturingBins,
+  markMaturingBinSynced,
+  clearAllPendingMaturingBins,
+  hasPendingMaturingBins as hasPendingMaturingBinsStorage,
   type PendingNoteWrite,
   type PendingEmailSend,
 } from '@/utils/storage';
@@ -134,6 +140,17 @@ interface AppContextType {
   }) => Promise<void>;
   syncPendingNotes: () => Promise<void>;
   syncPendingEmails: () => Promise<void>;
+
+  // Offline-queued appends to the maturing-bins "Bin Tracker" tab. Callers
+  // (Consolidation / DropOff) fire-and-forget; the queue persists any failed
+  // POSTs and drains on boot / retry.
+  queueMaturingBinWrite: (params: {
+    bin: MaturingBin;
+    collectorName: string;
+    farmName: string;
+  }) => Promise<boolean>;
+  syncPendingMaturingBins: () => Promise<void>;
+  hasPendingMaturingBins: () => boolean;
 
   // Ad-hoc / early pickup support
   getAllClientsForPicker: () => Client[];
@@ -296,6 +313,93 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     }
   }, [addToast]);
+
+  // Sync pending maturing-bin appends to the Bin Tracker tab. Same
+  // "queue then drain" shape as the writes / notes / emails syncs above.
+  const syncPendingMaturingBins = useCallback(async () => {
+    const entries = getPendingMaturingBins();
+    if (entries.length === 0) return;
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const entry of entries) {
+      try {
+        const response = await apiFetch('/.netlify/functions/maturing-bins-write', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bin: entry.bin,
+            collectorName: entry.collectorName,
+            farmName: entry.farmName,
+          }),
+        });
+        if (response.ok) {
+          markMaturingBinSynced(entry.id);
+          successCount++;
+        } else {
+          failCount++;
+        }
+      } catch (error) {
+        console.error(`Failed to send maturing-bin ${entry.bin.serialNumber} (still queued):`, error);
+        failCount++;
+      }
+    }
+
+    if (successCount > 0 && failCount === 0) {
+      console.log(`Synced ${successCount} pending maturing bin write(s)`);
+      addToast('success', `Synced ${successCount} bin${successCount > 1 ? 's' : ''} to the compost sheet`);
+    } else if (failCount > 0) {
+      addToast('error', `${failCount} bin write${failCount > 1 ? 's' : ''} still waiting to send`, {
+        label: 'Retry',
+        onClick: () => syncPendingMaturingBins(),
+      });
+    }
+  }, [addToast]);
+
+  // Queue a maturing-bin write: try the network first, persist to the local
+  // queue on any non-2xx / network error. Returns true if the write landed
+  // straight away, false if it was queued for retry. Callers should treat the
+  // false path as a "we've saved it, it'll retry when you're back online" state
+  // rather than a lost write.
+  const queueMaturingBinWrite = useCallback(async (params: {
+    bin: MaturingBin;
+    collectorName: string;
+    farmName: string;
+  }): Promise<boolean> => {
+    const entry = {
+      id: generateId(),
+      bin: params.bin,
+      collectorName: params.collectorName,
+      farmName: params.farmName,
+      createdAt: new Date().toISOString(),
+    };
+
+    try {
+      const response = await apiFetch('/.netlify/functions/maturing-bins-write', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bin: entry.bin,
+          collectorName: entry.collectorName,
+          farmName: entry.farmName,
+        }),
+      });
+      if (response.ok) return true;
+      // Non-2xx — persist so the retry loop can catch it later.
+      console.error(`maturing-bins-write returned ${response.status} for ${entry.bin.serialNumber}; queued for retry`);
+      savePendingMaturingBin(entry);
+      return false;
+    } catch (error) {
+      console.error(`maturing-bins-write network error for ${entry.bin.serialNumber}; queued for retry:`, error);
+      savePendingMaturingBin(entry);
+      return false;
+    }
+  }, []);
+
+  const hasPendingMaturingBins = useCallback((): boolean => {
+    return hasPendingMaturingBinsStorage();
+  }, []);
 
   // Queue a pickup-note write: save locally first, try network, toast on failure
   const queueNoteWrite = useCallback(async (params: Omit<PendingNoteWrite, 'id' | 'timestamp'>) => {
@@ -531,10 +635,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         console.log(`Found ${pendingEmailsCount} pending email(s), attempting send...`);
         setTimeout(() => syncPendingEmails(), 2000);
       }
+
+      // Retry any pending maturing-bin writes queued in a prior session
+      const pendingMaturingBinsCount = getPendingMaturingBins().length;
+      if (pendingMaturingBinsCount > 0) {
+        console.log(`Found ${pendingMaturingBinsCount} pending maturing bin(s), attempting sync...`);
+        setTimeout(() => syncPendingMaturingBins(), 2500);
+      }
     };
 
     initializeApp();
-  }, [loadRouteForDate, syncPendingWrites, syncPendingNotes, syncPendingEmails]);
+  }, [loadRouteForDate, syncPendingWrites, syncPendingNotes, syncPendingEmails, syncPendingMaturingBins]);
 
   // Background self-healing: re-run the geocoder chain for any address that
   // failed >24 h ago. Runs once on boot (after the UI has settled) and on a
@@ -851,6 +962,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     clearAllPendingWrites();
     clearAllPendingNotes();
     clearAllPendingEmails();
+    clearAllPendingMaturingBins();
     setCollector(null);
     setPickups([]);
     setDropOff(null);
@@ -1093,6 +1205,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         queueEmailSend,
         syncPendingNotes,
         syncPendingEmails,
+        queueMaturingBinWrite,
+        syncPendingMaturingBins,
+        hasPendingMaturingBins,
       }}
     >
       {children}

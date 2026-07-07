@@ -22,7 +22,6 @@ import { ConsolidationProgress } from '@/components/consolidation/ConsolidationP
 import { SerialNumberModal } from '@/components/consolidation/SerialNumberModal';
 import { useApp } from '@/contexts/AppContext';
 import { getFarmById } from '@/utils/data';
-import { apiFetch } from '@/utils/apiClient';
 import {
   generateId,
   getCurrentDate,
@@ -69,7 +68,7 @@ function NewMaturingBinZone() {
 
 export function DropOffPage() {
   const navigate = useNavigate();
-  const { collector, route, pickups, dropOff, completeDropOff, sheetClients, addToast, queueEmailSend } = useApp();
+  const { collector, route, pickups, dropOff, completeDropOff, sheetClients, addToast, queueEmailSend, queueMaturingBinWrite } = useApp();
 
   const farm = route?.destination_farm_id ? getFarmById(route.destination_farm_id) : undefined;
 
@@ -355,21 +354,18 @@ export function DropOffPage() {
     setIsExporting(true);
 
     try {
-      // Export each bin to the maturing bins spreadsheet
+      // Export each bin to the maturing bins sheet via the offline queue
+      // (falls through to localStorage on any non-2xx / network error so the
+      // AppContext retry loop can drain it later).
+      let sentCount = 0;
+      let queuedCount = 0;
       for (const bin of session.maturingBins) {
-        const response = await apiFetch('/.netlify/functions/maturing-bins-write', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            bin,
-            collectorName: collector.name,
-            farmName: farm.farm_name,
-          }),
+        const ok = await queueMaturingBinWrite({
+          bin,
+          collectorName: collector.name,
+          farmName: farm.farm_name,
         });
-
-        if (!response.ok) {
-          console.error(`Failed to export bin ${bin.serialNumber}`);
-        }
+        if (ok) sentCount++; else queuedCount++;
       }
 
       // Mark consolidation as completed
@@ -405,11 +401,17 @@ export function DropOffPage() {
         });
       }
 
-      addToast('success', `Exported ${session.maturingBins.length} bin(s) to maturing sheet`);
+      if (queuedCount === 0) {
+        addToast('success', `Exported ${sentCount} bin(s) to maturing sheet`);
+      } else if (sentCount === 0) {
+        addToast('info', `Saved ${queuedCount} bin(s) locally — will retry when you're back online`);
+      } else {
+        addToast('info', `Sent ${sentCount}, saved ${queuedCount} locally — the rest will retry when you're back online`);
+      }
       navigate('/summary');
     } catch (error) {
-      console.error('Export error:', error);
-      addToast('error', 'Failed to export to sheet, but drop-off saved locally');
+      console.error('Drop-off finalisation error:', error);
+      addToast('error', 'Something went wrong finishing drop-off - your data is saved locally');
       navigate('/summary');
     } finally {
       setIsExporting(false);
