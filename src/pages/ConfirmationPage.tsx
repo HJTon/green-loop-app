@@ -56,6 +56,9 @@ export function ConfirmationPage() {
 
   const unitName = client.collection_type === 'bins' ? 'bins' : 'buckets';
   const isSoil = client.collection_type === 'soil';
+  // A first-visit drop-off records bins_collected: 0 (nothing was collected) —
+  // show the drop-off wording instead of "0 bins, fullness: (blank)".
+  const isFirstVisitDropOff = client.is_first_visit === true && pickup.bins_collected === 0 && !isSoil;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-green-50 to-white flex flex-col items-center justify-center px-4">
@@ -78,6 +81,11 @@ export function ConfirmationPage() {
             <div className="flex justify-between">
               <span className="text-gray-600">Soil / green-waste</span>
               <span className="font-semibold text-gray-900">Dropped at community garden</span>
+            </div>
+          ) : isFirstVisitDropOff ? (
+            <div className="flex justify-between">
+              <span className="text-gray-600">First visit</span>
+              <span className="font-semibold text-gray-900">Bins dropped off</span>
             </div>
           ) : (
             <>

@@ -146,8 +146,10 @@ export function SummaryPage() {
                     <p className="font-medium text-gray-900">
                       {client?.business_name || 'Unknown'}
                     </p>
-                    <p className="text-sm text-gray-500">
-                      {pickup.status === 'skipped'
+                    <p className={`text-sm ${pickup.aborted ? 'text-amber-600 font-medium' : 'text-gray-500'}`}>
+                      {pickup.aborted
+                        ? 'Aborted — bins not out (chargeable)'
+                        : pickup.status === 'skipped'
                         ? 'Skipped'
                         : client?.collection_type === 'soil'
                         ? 'Soil / green-waste dropped'

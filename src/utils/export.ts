@@ -31,6 +31,7 @@ export function exportPickupsToCSV(
     'urgency',
     'collector_name',
     'status',
+    'aborted',
   ];
 
   const rows = pickups.map(pickup => {
@@ -51,6 +52,7 @@ export function exportPickupsToCSV(
       pickup.report?.urgency || '',
       collector?.name || 'Unknown',
       pickup.status,
+      pickup.aborted ? 'yes' : '',
     ].join(',');
   });
 

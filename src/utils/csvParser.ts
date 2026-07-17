@@ -141,7 +141,9 @@ export function formatDateForComparison(date: Date): string {
 export function isPickupMarked(cellValue: string): boolean {
   if (!cellValue) return false;
   const normalized = cellValue.toLowerCase().trim();
-  return normalized === 'pick up' || normalized === 'pickup' || normalized === 'pick-up';
+  // Covers 'pick up' / 'pickup' / 'pick-up' plus overwritten markers like
+  // 'Pick Up (Aborted)' — those still need to show up as a route stop.
+  return normalized.startsWith('pick');
 }
 
 /**

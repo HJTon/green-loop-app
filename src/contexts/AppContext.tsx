@@ -125,6 +125,10 @@ interface AppContextType {
   loadRouteForDate: (date: Date) => Promise<void>;
   setViewDate: (date: string, readOnly?: boolean) => void;
   recordBinCount: (clientId: string, count: number) => Promise<void>;
+  // Aborted pickup (bins not out): overwrites the marker cell so it still
+  // bills, using the client's expected quantity as the count. Scheduled
+  // on-sheet stops only — callers must not use this for ad-hoc/new-location stops.
+  recordAbortedPickup: (clientId: string) => Promise<void>;
   getClientById: (clientId: string) => Client | undefined;
   refreshData: () => Promise<void>;
   syncPendingWrites: () => Promise<void>;
@@ -753,6 +757,60 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [selectedDate, sheetClients, route, addToast, syncPendingWrites]);
 
+  // Bins-not-out abort: overwrite the marker cell with "Pick Up (Aborted)" so
+  // the Xero exporter still bills it (it matches on marker.includes('pick')),
+  // and write the client's expected quantity as the count. Scheduled on-sheet
+  // stops only — the caller keeps ad-hoc/new-location stops on the plain skip path.
+  const recordAbortedPickup = useCallback(async (clientId: string) => {
+    const date = parseDateLocal(selectedDate);
+    const client = sheetClients.find(c => c.id === clientId);
+
+    const queueAndWrite = async (rowIndex: number, dateColumnIndex: number, value: string, label: string) => {
+      const newWrite: PendingWrite = {
+        id: generateId(),
+        rowIndex,
+        dateColumnIndex,
+        value,
+        businessName: client?.business_name || clientId,
+        date: selectedDate,
+        timestamp: new Date().toISOString(),
+      };
+      savePendingWrite(newWrite);
+      setPendingWrites(getPendingWrites());
+
+      try {
+        await writeBinCount(rowIndex, dateColumnIndex, value);
+        markWriteSynced(rowIndex, dateColumnIndex);
+        setPendingWrites(getPendingWrites());
+        console.log(`Written ${label} for ${newWrite.businessName} to Google Sheets`);
+        return true;
+      } catch (error) {
+        console.error(`Failed to write ${label} to Google Sheets (saved locally):`, error);
+        return false;
+      }
+    };
+
+    const writeInfo = getPickupWriteInfo(clientId, date);
+    if (!writeInfo) {
+      addToast('error', `Couldn't find ${client?.business_name || clientId} in the sheet`);
+      return;
+    }
+
+    const count = Math.max(1, client?.expected_quantity || 1);
+    const unitWord = client?.collection_type === 'buckets' ? 'buckets' : 'bins';
+    const markerOk = await queueAndWrite(writeInfo.rowIndex, writeInfo.dateColumnIndex, 'Pick Up (Aborted)', 'aborted marker');
+    const countOk = await queueAndWrite(writeInfo.rowIndex + 1, writeInfo.dateColumnIndex, count.toString(), `${count} ${unitWord} (aborted)`);
+
+    if (markerOk && countOk) {
+      addToast('success', `Aborted pickup recorded — ${count} ${unitWord} will be charged`);
+    } else {
+      addToast('error', `Couldn't save aborted pickup to sheet - will retry`, {
+        label: 'Retry Now',
+        onClick: () => syncPendingWrites(),
+      });
+    }
+  }, [selectedDate, sheetClients, addToast, syncPendingWrites]);
+
   // Return every client in the spreadsheet for the ad-hoc picker
   const getAllClientsForPicker = useCallback((): Client[] => {
     return getAllClients();
@@ -1192,6 +1250,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         loadRouteForDate,
         setViewDate,
         recordBinCount,
+        recordAbortedPickup,
         getClientById,
         refreshData,
         syncPendingWrites,

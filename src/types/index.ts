@@ -152,6 +152,8 @@ export interface PickupRecord {
   photos: string[];
   report: PickupReport | null;
   status: 'completed' | 'skipped';
+  // Bins were never put out — skip is chargeable rather than a free skip.
+  aborted?: boolean;
 }
 
 // Consolidation types - A pickup tile that can be dragged
