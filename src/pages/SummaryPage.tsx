@@ -1,15 +1,18 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Trophy, Truck, Trash2, AlertTriangle, Download, ArrowLeft } from 'lucide-react';
+import { Trophy, Truck, Trash2, AlertTriangle, Download, ArrowLeft, X } from 'lucide-react';
 import { Header } from '@/components/Header';
 import { Button } from '@/components/Button';
 import { useApp } from '@/contexts/AppContext';
 import { clients, collectors, farms, getFarmById } from '@/utils/data';
 import { exportTodayData } from '@/utils/export';
+import { getPendingNotes, getPendingMaturingBins } from '@/utils/storage';
 
 export function SummaryPage() {
   const navigate = useNavigate();
-  const { collector, pickups, completedCount, totalStops, resetDay, dropOff, route } = useApp();
+  const { collector, pickups, completedCount, totalStops, resetDay, dropOff, route, pendingWrites } = useApp();
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [csvExported, setCsvExported] = useState(false);
 
   const destinationFarm = route?.destination_farm_id ? getFarmById(route.destination_farm_id) : undefined;
 
@@ -30,12 +33,24 @@ export function SummaryPage() {
     return null;
   }
 
+  // Export downloads the CSV; the destructive reset only happens after the
+  // driver confirms in the modal below (the CSV is the only local copy of
+  // fullness/serial detail, so never wipe on the same tap that downloads it).
   const handleExport = () => {
-    exportTodayData(todayPickups, clients, collectors, dropOff, farms);
-    // Reset for next day and go back to login
+    setCsvExported(exportTodayData(todayPickups, clients, collectors, dropOff, farms));
+    setShowResetConfirm(true);
+  };
+
+  const handleConfirmReset = () => {
+    setShowResetConfirm(false);
     resetDay();
     navigate('/');
   };
+
+  // Queued sheet writes survive resetDay() and retry on next app load — this
+  // count just tells the driver something hasn't landed yet.
+  const pendingSyncCount =
+    pendingWrites.length + getPendingNotes().length + getPendingMaturingBins().length;
 
   const handleBackToRoute = () => {
     navigate('/route');
@@ -155,6 +170,9 @@ export function SummaryPage() {
                         ? 'Soil / green-waste dropped'
                         : `${pickup.bins_collected}x ${pickup.bin_fullness.join(', ')}`}
                     </p>
+                    {pickup.notes && pickup.notes !== 'Skipped' && (
+                      <p className="text-sm text-gray-600 mt-1 italic">“{pickup.notes}”</p>
+                    )}
                   </div>
                   <span className="text-sm text-gray-400">{pickup.time}</span>
                 </div>
@@ -183,6 +201,46 @@ export function SummaryPage() {
 
       {/* Bottom padding */}
       <div className="h-8" />
+
+      {/* Confirm reset after export — resetDay() wipes today's local records */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl w-full max-w-sm overflow-hidden shadow-xl">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">Start a new day?</h2>
+              <button
+                onClick={() => setShowResetConfirm(false)}
+                className="p-1 text-gray-400 hover:text-gray-600"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <p className="text-sm text-gray-600">
+                {csvExported
+                  ? 'The CSV has been downloaded — check it saved before resetting. '
+                  : 'Nothing was exported (no pickups recorded for today). '}
+                Resetting clears today's pickups from this device.
+              </p>
+              {pendingSyncCount > 0 && (
+                <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  {pendingSyncCount} record{pendingSyncCount > 1 ? 's' : ''} still
+                  waiting to sync to the sheet — they'll keep retrying after the
+                  reset next time the app opens.
+                </p>
+              )}
+
+              <Button fullWidth onClick={handleConfirmReset}>
+                Reset for new day
+              </Button>
+              <Button fullWidth variant="outline" onClick={() => setShowResetConfirm(false)}>
+                Not yet
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

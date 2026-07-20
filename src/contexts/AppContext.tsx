@@ -36,7 +36,6 @@ import {
   getCurrentDate,
   savePendingWrite,
   getPendingWrites,
-  clearAllPendingWrites,
   markWriteSynced,
   getAdHocStopsForDate,
   saveAdHocStop,
@@ -47,15 +46,12 @@ import {
   savePendingNote,
   getPendingNotes,
   markNoteSynced,
-  clearAllPendingNotes,
   savePendingEmail,
   getPendingEmails,
   markEmailSynced,
-  clearAllPendingEmails,
   savePendingMaturingBin,
   getPendingMaturingBins,
   markMaturingBinSynced,
-  clearAllPendingMaturingBins,
   hasPendingMaturingBins as hasPendingMaturingBinsStorage,
   type PendingNoteWrite,
   type PendingEmailSend,
@@ -1017,14 +1013,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const resetDay = async () => {
     clearAllData();
-    clearAllPendingWrites();
-    clearAllPendingNotes();
-    clearAllPendingEmails();
-    clearAllPendingMaturingBins();
+    // Deliberately NOT clearing the pending queues (writes / notes / emails /
+    // maturing bins): if the day ends offline, those are the only copy of
+    // unsynced sheet data. They're self-contained payloads and retry on next
+    // app load, so they survive the reset and drain when back online.
     setCollector(null);
     setPickups([]);
     setDropOff(null);
-    setPendingWrites([]);
+    setPendingWrites(getPendingWrites());
     setIsReadOnlyView(false);
     // Reload fresh route
     clearCache();
