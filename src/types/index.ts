@@ -178,6 +178,14 @@ export interface ConsolidatedContent {
   binsCount: number;
   collectionType: CollectionType;
   averageFullness: number;
+  /**
+   * Serial of the SOURCE bin this content came out of (captured at pickup).
+   * Optional because sessions saved before 2026-08-13 don't have it. Not yet
+   * written to the Bin Tracker sheet — kept so per-source volume can be
+   * reported later instead of the placeholder 5:4:3:2:1 weighting the compost
+   * monitor currently assumes.
+   */
+  sourceSerial?: string;
 }
 
 // A physical maturing bin
@@ -201,6 +209,8 @@ export interface ConsolidationSession {
   pickupTiles: PickupTile[];
   maturingBins: MaturingBin[];
   completedAt: string | null;
+  /** The bin currently being filled. Persisted so a reload mid-farm resumes. */
+  activeBinId?: string | null;
 }
 
 // App state

@@ -8,11 +8,22 @@ interface SerialNumberModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (serialNumber: string) => void;
+  /**
+   * Serials of wheelie bins collected today, offered as one-tap options —
+   * maturing normally happens in one of the bins already on the truck, whose
+   * serial was scanned at pickup. Saves re-scanning it at the farm.
+   */
+  suggestions?: Array<{ serial: string; businessName: string }>;
 }
 
 type Mode = 'choose' | 'camera' | 'manual' | 'processing' | 'confirm';
 
-export function SerialNumberModal({ isOpen, onClose, onSubmit }: SerialNumberModalProps) {
+export function SerialNumberModal({
+  isOpen,
+  onClose,
+  onSubmit,
+  suggestions = [],
+}: SerialNumberModalProps) {
   const [mode, setMode] = useState<Mode>('choose');
   const [serialNumber, setSerialNumber] = useState('');
   const [confidence, setConfidence] = useState(0);
@@ -88,9 +99,39 @@ export function SerialNumberModal({ isOpen, onClose, onSubmit }: SerialNumberMod
           {/* Choose mode */}
           {mode === 'choose' && (
             <div className="space-y-3">
-              <p className="text-sm text-gray-600 mb-4">
-                How would you like to enter the bin serial number?
-              </p>
+              {suggestions.length > 0 && (
+                <div className="mb-4">
+                  <p className="text-sm text-gray-600 mb-2">
+                    Collected today — tap the bin you&apos;re filling:
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
+                    {suggestions.map(s => (
+                      <button
+                        key={s.serial}
+                        onClick={() => {
+                          onSubmit(formatSerialNumber(s.serial));
+                          handleClose();
+                        }}
+                        className="inline-flex items-center gap-1.5 border-2 border-gray-200 rounded-full px-3 py-1.5 text-sm hover:border-green-primary hover:bg-green-50"
+                      >
+                        <span className="font-mono font-semibold text-gray-800">
+                          #{s.serial}
+                        </span>
+                        <span className="text-xs text-gray-500 truncate max-w-[9rem]">
+                          {s.businessName}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-2">Or:</p>
+                </div>
+              )}
+
+              {suggestions.length === 0 && (
+                <p className="text-sm text-gray-600 mb-4">
+                  How would you like to enter the bin serial number?
+                </p>
+              )}
 
               {/* Scan option */}
               <button

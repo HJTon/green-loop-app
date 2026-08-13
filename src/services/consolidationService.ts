@@ -6,6 +6,7 @@ import type {
   ConsolidationSession,
   BinFullness,
   Client,
+  CollectionType,
 } from '@/types';
 import { generateId, getCurrentDate } from '@/utils/storage';
 
@@ -35,24 +36,10 @@ export function calculateMaturingBinVolume(bin: MaturingBin): number {
   }, 0);
 }
 
-// Check if adding a tile would exceed bin capacity
-export function wouldExceedCapacity(bin: MaturingBin, tile: PickupTile): boolean {
-  const currentVolume = calculateMaturingBinVolume(bin);
-  const newVolume = calculateTileVolume(tile);
-  return (currentVolume + newVolume) > BIN_CAPACITY_LITRES;
-}
-
-// Get volume warning message
-export function getVolumeWarning(bin: MaturingBin, tile: PickupTile): string | null {
-  const currentVolume = calculateMaturingBinVolume(bin);
-  const newVolume = calculateTileVolume(tile);
-  const totalVolume = currentVolume + newVolume;
-
-  if (totalVolume > BIN_CAPACITY_LITRES) {
-    return `This will be ${Math.round(totalVolume)}L total, exceeding the ${BIN_CAPACITY_LITRES}L bin capacity. Are you sure?`;
-  }
-  return null;
-}
+// NOTE: the 120L capacity warning that used to live here was removed on
+// 2026-08-13. Tipping 120L wheelie bins into a 120L maturing bin trips it on
+// almost every drop-off, so it was pure friction. Volume is still shown as a
+// neutral readout on the active bin.
 
 // Calculate average fullness percentage
 export function calculateAverageFullness(fullness: BinFullness[]): number {
@@ -128,7 +115,17 @@ export function addPickupToMaturingBin(
   bin: MaturingBin,
   tile: PickupTile
 ): MaturingBin {
-  const content: ConsolidatedContent = {
+  return addPickupsToMaturingBin(bin, [tile]);
+}
+
+// Add several pickups at once. One content row per physical bin/bucket is kept
+// (not collapsed per business) so per-source volume survives — the UI groups
+// them for display.
+export function addPickupsToMaturingBin(
+  bin: MaturingBin,
+  tiles: PickupTile[]
+): MaturingBin {
+  const contents: ConsolidatedContent[] = tiles.map(tile => ({
     id: generateId(),
     pickupTileId: tile.id,
     clientId: tile.clientId,
@@ -136,11 +133,12 @@ export function addPickupToMaturingBin(
     binsCount: tile.binsCollected,
     collectionType: tile.collectionType,
     averageFullness: tile.averageFullness,
-  };
+    sourceSerial: tile.serialNumber || undefined,
+  }));
 
   return {
     ...bin,
-    contents: [...bin.contents, content],
+    contents: [...bin.contents, ...contents],
   };
 }
 
@@ -184,6 +182,121 @@ export function getUnassignedTiles(session: ConsolidationSession): PickupTile[] 
 // Get assigned pickup count
 export function getAssignedCount(session: ConsolidationSession): number {
   return session.pickupTiles.filter(tile => tile.isAssigned).length;
+}
+
+// ── Grouping ────────────────────────────────────────────────────────────────
+// A business with 4 bins collected produces 4 tiles. Assigning them one at a
+// time is what made the farm screen slow, so both the "to assign" list and a
+// bin's contents are grouped by business for display and acted on in bulk.
+
+export interface BusinessGroup {
+  key: string;                    // clientId + collection type
+  clientId: string;
+  businessName: string;
+  collectionType: CollectionType;
+  tiles: PickupTile[];            // still unassigned, in pickup order
+  averageFullness: number;
+}
+
+export function groupUnassignedTiles(session: ConsolidationSession): BusinessGroup[] {
+  const groups = new Map<string, BusinessGroup>();
+
+  for (const tile of getUnassignedTiles(session)) {
+    const key = `${tile.clientId}-${tile.collectionType}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.tiles.push(tile);
+    } else {
+      groups.set(key, {
+        key,
+        clientId: tile.clientId,
+        businessName: tile.businessName,
+        collectionType: tile.collectionType,
+        tiles: [tile],
+        averageFullness: tile.averageFullness,
+      });
+    }
+  }
+
+  // Average fullness across the group, for the badge on the row.
+  return [...groups.values()].map(group => ({
+    ...group,
+    averageFullness: Math.round(
+      group.tiles.reduce((sum, t) => sum + t.averageFullness, 0) / group.tiles.length
+    ),
+  }));
+}
+
+export interface BinContentGroup {
+  key: string;
+  clientId: string;
+  businessName: string;
+  collectionType: CollectionType;
+  count: number;
+  litres: number;
+  contents: ConsolidatedContent[];
+}
+
+export function groupBinContents(bin: MaturingBin): BinContentGroup[] {
+  const groups = new Map<string, BinContentGroup>();
+
+  for (const content of bin.contents) {
+    const key = `${content.clientId}-${content.collectionType}`;
+    const capacity =
+      content.collectionType === 'bins' ? BIN_CAPACITY_LITRES : BUCKET_CAPACITY_LITRES;
+    const litres = (content.averageFullness / 100) * capacity;
+
+    const existing = groups.get(key);
+    if (existing) {
+      existing.count += content.binsCount;
+      existing.litres += litres;
+      existing.contents.push(content);
+    } else {
+      groups.set(key, {
+        key,
+        clientId: content.clientId,
+        businessName: content.businessName,
+        collectionType: content.collectionType,
+        count: content.binsCount,
+        litres,
+        contents: [content],
+      });
+    }
+  }
+
+  return [...groups.values()];
+}
+
+// Which tiles are sitting in this bin for a given business — used to take one
+// back out without hunting for a specific content row.
+export function getBinGroupForClient(
+  bin: MaturingBin,
+  clientId: string,
+  collectionType: CollectionType
+): BinContentGroup | undefined {
+  return groupBinContents(bin).find(
+    g => g.clientId === clientId && g.collectionType === collectionType
+  );
+}
+
+// Collected wheelie bins that could become the maturing bin. Buckets can't —
+// maturing has to happen in a wheelie bin.
+export function getSuggestedBinSerials(
+  session: ConsolidationSession
+): Array<{ serial: string; businessName: string }> {
+  const used = new Set(session.maturingBins.map(b => b.serialNumber));
+  const seen = new Set<string>();
+  const suggestions: Array<{ serial: string; businessName: string }> = [];
+
+  for (const tile of session.pickupTiles) {
+    if (tile.collectionType !== 'bins') continue;
+    if (!tile.serialNumber) continue;
+    if (used.has(tile.serialNumber) || seen.has(tile.serialNumber)) continue;
+    seen.add(tile.serialNumber);
+    suggestions.push({ serial: tile.serialNumber, businessName: tile.businessName });
+  }
+
+  return suggestions;
 }
 
 // Format maturing bin data for export
