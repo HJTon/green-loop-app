@@ -42,6 +42,44 @@ function getGoogleSheetsClient() {
   return google.sheets({ version: 'v4', auth });
 }
 
+// Litres per collection type. Mirrors src/services/consolidationService.ts —
+// a wheelie bin holds 120L, a bucket 20L, and anything else is treated as a
+// bucket rather than guessed upward.
+const CAPACITY_LITRES: Record<string, number> = { bins: 120, buckets: 20 };
+
+interface SourceBreakdownEntry {
+  name: string;
+  bins: number;
+  buckets: number;
+  litres: number;
+}
+
+/**
+ * Collapse a bin's contents (one row per physical bin/bucket tipped in) into
+ * one entry per business, with the volume each contributed.
+ */
+function buildSourceBreakdown(contents: MaturingBinContent[]): SourceBreakdownEntry[] {
+  const byName = new Map<string, SourceBreakdownEntry>();
+
+  for (const content of contents) {
+    const capacity = CAPACITY_LITRES[content.collectionType] ?? CAPACITY_LITRES.buckets;
+    const litres = (content.averageFullness / 100) * capacity * content.binsCount;
+
+    const entry = byName.get(content.businessName) || {
+      name: content.businessName,
+      bins: 0,
+      buckets: 0,
+      litres: 0,
+    };
+    if (content.collectionType === 'bins') entry.bins += content.binsCount;
+    else entry.buckets += content.binsCount;
+    entry.litres += litres;
+    byName.set(content.businessName, entry);
+  }
+
+  return [...byName.values()].map(e => ({ ...e, litres: Math.round(e.litres) }));
+}
+
 // Format date for display (DD-Mon-YYYY, e.g., 29-Dec-2025)
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr);
@@ -90,11 +128,26 @@ export default async (request: Request, context: Context) => {
     const uniqueBusinessNames = [...new Set(bin.contents.map(c => c.businessName))];
     const sources = [0, 1, 2, 3, 4].map(i => uniqueBusinessNames[i] || '');
 
-    // Prepare row data to match current Bin Tracker columns (updated 2026-04-21):
+    // Anything past the 5 "Content from" columns used to be dropped on the
+    // floor — a bin fed by 6+ businesses silently lost the rest. B–F stay as
+    // they are (the compost monitor and Caroline both read them), and the
+    // overflow goes in col M instead of vanishing.
+    const overflowSources = uniqueBusinessNames.slice(5).join(', ');
+
+    // Per-source breakdown, col N. The compost monitor derives each build's
+    // feedstock composition from these numbers; without them it falls back to
+    // a positional 5:4:3:2:1 guess based on the order things happened to be
+    // assigned at the farm. Litres is the meaningful share (a quarter-full
+    // bucket is not a full wheelie bin), with counts kept alongside.
+    const breakdown = buildSourceBreakdown(bin.contents);
+
+    // Prepare row data to match current Bin Tracker columns (updated 2026-08-13):
     // A: Date of collection
     // B–F: Content from (sources 1–5)
     // G: Number (bin serial)
-    // H onwards: Left blank — colour / maturation / batching filled in later
+    // H–L: Left blank — colour / maturation / batching / batch / notes, filled in later
+    // M: Content from 6+ (overflow names)
+    // N: Source breakdown (JSON)
     const rowData = [
       formatDate(bin.createdDate),
       sources[0],
@@ -103,12 +156,19 @@ export default async (request: Request, context: Context) => {
       sources[3],
       sources[4],
       bin.serialNumber,
+      '', // H colour
+      '', // I date of maturation
+      '', // J date of batching
+      '', // K batch
+      '', // L notes
+      overflowSources,
+      JSON.stringify(breakdown),
     ];
 
     // Append the row to the Bin Tracker sheet
     await sheets.spreadsheets.values.append({
       spreadsheetId,
-      range: 'Bin Tracker!A:G',
+      range: 'Bin Tracker!A:N',
       valueInputOption: 'USER_ENTERED',
       insertDataOption: 'INSERT_ROWS',
       requestBody: {
