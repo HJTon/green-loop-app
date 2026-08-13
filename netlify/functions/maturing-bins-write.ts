@@ -89,6 +89,59 @@ function formatDate(dateStr: string): string {
   return `${day}-${month}-${year}`;
 }
 
+const TAB = 'Bin Tracker';
+const COL_DATE = 0; // col A — the one column every real row fills
+
+// Tab id, cached across warm invocations. It only changes if the tab is
+// recreated, and a stale one fails the insert loudly rather than writing
+// anywhere unexpected — the client then queues the bin for retry.
+let cachedTabId: number | null = null;
+
+async function getTabId(
+  sheets: ReturnType<typeof getGoogleSheetsClient>,
+  spreadsheetId: string
+): Promise<number> {
+  if (cachedTabId !== null) return cachedTabId;
+  const meta = await sheets.spreadsheets.get({ spreadsheetId });
+  const tab = meta.data.sheets?.find(s => s.properties?.title === TAB);
+  const id = tab?.properties?.sheetId;
+  if (id === undefined || id === null) throw new Error(`Tab "${TAB}" not found`);
+  cachedTabId = id;
+  return id;
+}
+
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+/**
+ * Parses the tab's DD-MMM-YYYY dates; null for anything else. Matches on the
+ * month's first three letters because `formatDate` renders September as
+ * "Sept" under en-NZ — same tolerance as the monitor's `parseTrackerDate`.
+ */
+function parseSheetDate(raw: string): number | null {
+  const m = /^(\d{1,2})-([A-Za-z]{3,})-(\d{4})$/.exec(raw.trim());
+  if (!m) return null;
+  const month = MONTHS.indexOf(m[2].slice(0, 3).toLowerCase());
+  if (month === -1) return null;
+  return Date.UTC(Number(m[3]), month, Number(m[1]));
+}
+
+/**
+ * 0-based row index the new row should take, keeping col A in date order.
+ * Rows with no parseable date in col A — the two trailing blanks and the
+ * separator row — are never mistaken for the end of the table.
+ */
+function findInsertIndex(rows: string[][], collectionDate: string): number {
+  const target = parseSheetDate(collectionDate);
+  let lastDated = 0; // header; a tab with no dated rows at all inserts at index 1
+  for (let i = 1; i < rows.length; i++) {
+    const d = parseSheetDate((rows[i]?.[COL_DATE] ?? '').toString());
+    if (d === null) continue;
+    if (target !== null && d > target) return i;
+    lastDated = i;
+  }
+  return lastDated + 1;
+}
+
 export default async (request: Request, context: Context) => {
   // Handle CORS preflight
   if (request.method === 'OPTIONS') return preflightResponse();
@@ -141,6 +194,8 @@ export default async (request: Request, context: Context) => {
     // bucket is not a full wheelie bin), with counts kept alongside.
     const breakdown = buildSourceBreakdown(bin.contents);
 
+    const collectionDate = formatDate(bin.createdDate);
+
     // Prepare row data to match current Bin Tracker columns (updated 2026-08-13):
     // A: Date of collection
     // B–F: Content from (sources 1–5)
@@ -149,7 +204,7 @@ export default async (request: Request, context: Context) => {
     // M: Content from 6+ (overflow names)
     // N: Source breakdown (JSON)
     const rowData = [
-      formatDate(bin.createdDate),
+      collectionDate,
       sources[0],
       sources[1],
       sources[2],
@@ -165,21 +220,51 @@ export default async (request: Request, context: Context) => {
       JSON.stringify(breakdown),
     ];
 
-    // Append the row to the Bin Tracker sheet
-    await sheets.spreadsheets.values.append({
+    // ─── Placement, not `values.append` ───────────────────────────────────────
+    // Append picks the "table" to extend by scanning the range, and this tab
+    // ends with two blank rows then a separator row whose only content is a
+    // "........." string in col K. On 2026-08-13 an identical append to
+    // 'Bin Tracker!A:N' resolved *that* as the table and put ten rows in cols
+    // K:X with col A empty (see maturing-bins-backfill-7may.ts). So we find the
+    // row ourselves from col A, open a gap, and write to an explicit range.
+    //
+    // Reading A:A is enough: the read stops at the last row holding a col A
+    // value, which is the last real row — the blanks and the separator (whose
+    // content is in K) fall off the end.
+    const tabId = await getTabId(sheets, spreadsheetId);
+    const read = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'Bin Tracker!A:N',
-      valueInputOption: 'USER_ENTERED',
-      insertDataOption: 'INSERT_ROWS',
+      range: `${TAB}!A:A`,
+    });
+    const insertAt = findInsertIndex((read.data.values as string[][]) || [], collectionDate);
+
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
       requestBody: {
-        values: [rowData],
+        requests: [{
+          insertDimension: {
+            range: { sheetId: tabId, dimension: 'ROWS', startIndex: insertAt, endIndex: insertAt + 1 },
+            // Inherit from the row below, so a manually highlighted row above
+            // doesn't hand its fill to a fresh bin.
+            inheritFromBefore: false,
+          },
+        }],
       },
+    });
+
+    const rowNumber = insertAt + 1; // 1-based, as the sheet numbers it
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${TAB}!A${rowNumber}:N${rowNumber}`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [rowData] },
     });
 
     return new Response(JSON.stringify({
       success: true,
       message: `Added maturing bin ${bin.serialNumber}`,
       serialNumber: bin.serialNumber,
+      row: rowNumber,
     }), {
       status: 200,
       headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
