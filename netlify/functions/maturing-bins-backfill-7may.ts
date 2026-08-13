@@ -5,10 +5,10 @@ import { checkAuth, corsHeaders, preflightResponse } from './_lib/auth';
 // One-shot, idempotent backfill for the collections of Thursday 7 May 2026.
 //
 // The collector never finalised that day's drop-off, so `maturing-bins-write`
-// was never called and the Bin Tracker has no rows at all for 7-May-2026 —
-// it is the only missing Thursday between January and August 2026. The bins
-// themselves went into CC8 (batched 18-Jun-2026), which is why CC8 shows only
-// 8 bins while spanning a feedstock window either side of the gap.
+// was never called and 7-May-2026 is the only Thursday missing from the Bin
+// Tracker between January and August 2026. The bins themselves went into CC8
+// (batched 18-Jun-2026), which is why CC8 shows only 8 bins while spanning a
+// feedstock window either side of the gap.
 //
 // What the rows below are built from:
 //   - WHO: the "7 May 2026" column of the invoicing sheet, which had eight
@@ -33,8 +33,19 @@ import { checkAuth, corsHeaders, preflightResponse } from './_lib/auth';
 // obviously not a real serial, and being unique it keeps
 // `compost-build-bins-remove.ts` (which matches on buildName + serial) working.
 //
-// Safe to re-run: if any row already carries the collection date, nothing is
-// appended. Supports ?dryRun=1.
+// ─── Why this does NOT use values.append ──────────────────────────────────────
+// The first version of this function appended to 'Bin Tracker!A:N' the same way
+// `maturing-bins-write.ts` does. The tab ends with two blank rows and then a
+// separator row whose only content is a "........." string in col K, and append
+// resolved *that* as the table to extend — so all five rows landed in cols K:X
+// with col A empty, ten columns to the right of where they belong.
+//
+// So this inserts at an explicit row index and writes with values.update, which
+// puts the rows exactly where it says. It also keeps them in date order, since
+// the tab is read chronologically by eye. `cleanupMalformed` removes any rows
+// left by the append-based version; it is a no-op once they are gone.
+//
+// Safe to re-run; supports ?dryRun=1.
 
 function getGoogleSheetsClient() {
   const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '{}');
@@ -45,11 +56,15 @@ function getGoogleSheetsClient() {
   return google.sheets({ version: 'v4', auth });
 }
 
+const TAB = 'Bin Tracker';
 const COLLECTION_DATE = '7-May-2026';
 const MATURATION_DATE = '28-May-2026'; // 21 days, as every other row uses
 const BATCHING_DATE = '18-Jun-2026';   // CC8's build date
 const BUILD_NAME = 'CC8';
 const NOTE = 'RECONSTRUCTED - drop-off never finalised; sources from invoicing sheet, volumes estimated';
+
+const COL_DATE = 0;
+const COL_BUILD = 10;
 
 interface Source {
   name: string;
@@ -88,21 +103,43 @@ function breakdownFor(sources: Source[]) {
   }));
 }
 
-function rowFor(sources: Source[], index: number): (string | number)[] {
+function rowFor(sources: Source[], index: number): string[] {
   const names = [...new Set(sources.map(s => s.name))];
   return [
-    COLLECTION_DATE,                              // A
+    COLLECTION_DATE,                                // A
     names[0] || '', names[1] || '', names[2] || '', // B, C, D
     names[3] || '', names[4] || '',                 // E, F
-    `RECON-07MAY-${index + 1}`,                   // G  serial placeholder
-    '',                                           // H  colour
-    MATURATION_DATE,                              // I
-    BATCHING_DATE,                                // J
-    BUILD_NAME,                                   // K
-    NOTE,                                         // L
-    names.slice(5).join(', '),                    // M  overflow (none here)
-    JSON.stringify(breakdownFor(sources)),        // N
+    `RECON-07MAY-${index + 1}`,                     // G  serial placeholder
+    '',                                             // H  colour
+    MATURATION_DATE,                                // I
+    BATCHING_DATE,                                  // J
+    BUILD_NAME,                                     // K
+    NOTE,                                           // L
+    names.slice(5).join(', '),                      // M  overflow (none here)
+    JSON.stringify(breakdownFor(sources)),          // N
   ];
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** Parses the tab's DD-MMM-YYYY dates; null for anything else. */
+function parseSheetDate(raw: string): number | null {
+  const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(raw.trim());
+  if (!m) return null;
+  const month = MONTHS.findIndex(x => x.toLowerCase() === m[2].toLowerCase());
+  if (month === -1) return null;
+  return Date.UTC(Number(m[3]), month, Number(m[1]));
+}
+
+async function getTabId(
+  sheets: ReturnType<typeof getGoogleSheetsClient>,
+  spreadsheetId: string
+): Promise<number> {
+  const meta = await sheets.spreadsheets.get({ spreadsheetId });
+  const tab = meta.data.sheets?.find(s => s.properties?.title === TAB);
+  const id = tab?.properties?.sheetId;
+  if (id === undefined || id === null) throw new Error(`Tab "${TAB}" not found`);
+  return id;
 }
 
 export default async (request: Request, _context: Context) => {
@@ -112,70 +149,128 @@ export default async (request: Request, _context: Context) => {
 
   const url = new URL(request.url);
   const dryRun = url.searchParams.get('dryRun') === '1';
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+    });
 
   try {
     const spreadsheetId = process.env.MATURING_BINS_SPREADSHEET_ID;
-    if (!spreadsheetId) {
-      return new Response(JSON.stringify({ error: 'MATURING_BINS_SPREADSHEET_ID not set' }), {
-        status: 500,
-        headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
-      });
-    }
+    if (!spreadsheetId) return json({ error: 'MATURING_BINS_SPREADSHEET_ID not set' }, 500);
 
     const sheets = getGoogleSheetsClient();
+    const tabId = await getTabId(sheets, spreadsheetId);
+
     const read = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'Bin Tracker!A:N',
+      range: `${TAB}!A:N`,
     });
+    const rows = read.data.values || [];
 
-    const existing = read.data.values || [];
-    const alreadyPresent = existing
+    // ── 1. Rows the append-based version misplaced ─────────────────────────────
+    // Signature: col A empty but col K holding the collection date, which is
+    // what a 10-column shift produces. Real rows always carry a date in col A.
+    const malformed: number[] = [];
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i] || [];
+      const colA = (row[COL_DATE] ?? '').toString().trim();
+      const colK = (row[COL_BUILD] ?? '').toString().trim();
+      if (colA === '' && colK === COLLECTION_DATE) malformed.push(i);
+    }
+
+    // ── 2. Already correctly present? ──────────────────────────────────────────
+    const alreadyPresent = rows
       .slice(1)
-      .filter(row => (row[0] ?? '').toString().trim() === COLLECTION_DATE);
+      .filter(row => (row[COL_DATE] ?? '').toString().trim() === COLLECTION_DATE).length;
 
-    if (alreadyPresent.length > 0) {
-      return new Response(JSON.stringify({
+    // ── 3. Where the rows belong, keeping the tab in date order ────────────────
+    const target = parseSheetDate(COLLECTION_DATE)!;
+    let insertAt = rows.length; // 0-based index of the first inserted row
+    for (let i = 1; i < rows.length; i++) {
+      const d = parseSheetDate((rows[i]?.[COL_DATE] ?? '').toString());
+      if (d !== null && d > target) {
+        insertAt = i;
+        break;
+      }
+    }
+
+    const newRows = RECONSTRUCTED.map(rowFor);
+    const totalLitres = RECONSTRUCTED.flatMap(breakdownFor).reduce((s, e) => s + e.litres, 0);
+    const plan = {
+      malformedRowsToDelete: malformed.map(i => i + 1), // 1-based, for eyeballing
+      alreadyPresent,
+      willInsertAtSheetRow: insertAt + 1,
+      rowsToInsert: alreadyPresent > 0 ? 0 : newRows.length,
+    };
+
+    if (dryRun) return json({ success: true, dryRun: true, ...plan, totalLitres, rows: newRows });
+
+    // ── 4. Delete the misplaced rows, bottom-up so indices stay valid ──────────
+    if (malformed.length > 0) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: [...malformed].reverse().map(i => ({
+            deleteDimension: {
+              range: { sheetId: tabId, dimension: 'ROWS', startIndex: i, endIndex: i + 1 },
+            },
+          })),
+        },
+      });
+      // Deletions above the insertion point shift it up.
+      insertAt -= malformed.filter(i => i < insertAt).length;
+    }
+
+    if (alreadyPresent > 0) {
+      return json({
         success: true,
         skipped: true,
-        message: `${COLLECTION_DATE} already has ${alreadyPresent.length} row(s) — nothing appended`,
-      }), {
-        status: 200,
-        headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+        deletedMalformed: malformed.length,
+        message: `${COLLECTION_DATE} already has ${alreadyPresent} correctly-placed row(s) — nothing inserted`,
       });
     }
 
-    const rows = RECONSTRUCTED.map(rowFor);
-    const totalLitres = RECONSTRUCTED.flatMap(breakdownFor).reduce((sum, e) => sum + e.litres, 0);
+    // ── 5. Make room, then write to an explicit range ──────────────────────────
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [{
+          insertDimension: {
+            range: {
+              sheetId: tabId,
+              dimension: 'ROWS',
+              startIndex: insertAt,
+              endIndex: insertAt + newRows.length,
+            },
+            inheritFromBefore: false,
+          },
+        }],
+      },
+    });
 
-    if (!dryRun) {
-      await sheets.spreadsheets.values.append({
-        spreadsheetId,
-        range: 'Bin Tracker!A:N',
-        valueInputOption: 'USER_ENTERED',
-        insertDataOption: 'INSERT_ROWS',
-        requestBody: { values: rows },
-      });
-    }
+    const firstRow = insertAt + 1; // 1-based
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${TAB}!A${firstRow}:N${firstRow + newRows.length - 1}`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: newRows },
+    });
 
-    return new Response(JSON.stringify({
+    return json({
       success: true,
-      dryRun,
-      appended: dryRun ? 0 : rows.length,
+      dryRun: false,
+      deletedMalformed: malformed.length,
+      inserted: newRows.length,
+      atSheetRows: `${firstRow}-${firstRow + newRows.length - 1}`,
       build: BUILD_NAME,
       totalLitres,
-      rows,
-    }), {
-      status: 200,
-      headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
     });
   } catch (error) {
     console.error('Error backfilling 7 May bins:', error);
-    return new Response(JSON.stringify({
+    return json({
       error: 'Failed to backfill 7 May bins',
       details: error instanceof Error ? error.message : 'Unknown error',
-    }), {
-      status: 500,
-      headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
-    });
+    }, 500);
   }
 };
