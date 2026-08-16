@@ -237,6 +237,24 @@ export default async (request: Request, context: Context) => {
       range: `${TAB}!A:A`,
     });
     const insertAt = findInsertIndex((read.data.values as string[][]) || [], collectionDate);
+    const rowNumber = insertAt + 1; // 1-based, as the sheet numbers it
+
+    // `?dryRun=1` reports where the row would go and writes nothing — the same
+    // escape hatch the two backfill functions have. It is the only way to check
+    // placement against the live tab without leaving a row someone has to
+    // delete by hand.
+    if (new URL(request.url).searchParams.get('dryRun') === '1') {
+      return new Response(JSON.stringify({
+        success: true,
+        dryRun: true,
+        serialNumber: bin.serialNumber,
+        wouldInsertAtRow: rowNumber,
+        rowData,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      });
+    }
 
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
@@ -252,7 +270,6 @@ export default async (request: Request, context: Context) => {
       },
     });
 
-    const rowNumber = insertAt + 1; // 1-based, as the sheet numbers it
     await sheets.spreadsheets.values.update({
       spreadsheetId,
       range: `${TAB}!A${rowNumber}:N${rowNumber}`,
