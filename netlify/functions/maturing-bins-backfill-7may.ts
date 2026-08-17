@@ -29,9 +29,20 @@ import { checkAuth, corsHeaders, preflightResponse } from './_lib/auth';
 // uses these volumes for the within-row split but counts the rows under
 // `estimatedBins` rather than passing reconstructions off as measurements.
 //
-// Serials are unrecoverable, so col G gets a RECON-07MAY-n placeholder. It is
-// obviously not a real serial, and being unique it keeps
-// `compost-build-bins-remove.ts` (which matches on buildName + serial) working.
+// Serials were unrecoverable at first, so col G got a RECON-07MAY-n
+// placeholder. Joe found the five real serials on 2026-08-17, and this function
+// now repairs those placeholders in place (see `repairSerials` below).
+//
+// **Which serial sat in which bin is not known** — the source they came from
+// listed the five without saying what each one held, and the tab's own history
+// can't disambiguate (these are reusable bins; four of the five appear on other
+// dates carrying other businesses). They are assigned to the rows in the order
+// they were found, which is arbitrary. Col L says so, so nobody later reads
+// row 153 as evidence that bin 4102747 specifically held that Novotel bin.
+//
+// What the serials DO corroborate: none of the five is recorded in use anywhere
+// between 7 May and CC8's batching on 18 Jun 2026, which is what you would
+// expect if they were sitting in these maturing bins for that whole window.
 //
 // ─── Why this does NOT use values.append ──────────────────────────────────────
 // The first version of this function appended to 'Bin Tracker!A:N' the same way
@@ -61,10 +72,20 @@ const COLLECTION_DATE = '7-May-2026';
 const MATURATION_DATE = '28-May-2026'; // 21 days, as every other row uses
 const BATCHING_DATE = '18-Jun-2026';   // CC8's build date
 const BUILD_NAME = 'CC8';
-const NOTE = 'RECONSTRUCTED - drop-off never finalised; sources from invoicing sheet, volumes estimated';
+const NOTE = 'RECONSTRUCTED - drop-off never finalised; sources from invoicing sheet, volumes estimated; serials recovered 17-Aug-2026 but not matched to individual bins';
+
+// The five real serials, in the order they were found. Joe has them written
+// down as 04102747 etc.; the leading zero is dropped here because all 260 other
+// serials in the tab are stored 7-digit (Sheets coerces them to numbers), and
+// `compost-build-bins-remove.ts` matches serials by exact string.
+const SERIALS = ['4102747', '4102765', '4102836', '4105629', '4105149'];
 
 const COL_DATE = 0;
+const COL_SERIAL = 6;
 const COL_BUILD = 10;
+
+/** The placeholders this function used to write, before the serials turned up. */
+const PLACEHOLDER_RE = /^RECON-07MAY-([1-5])$/;
 
 interface Source {
   name: string;
@@ -109,7 +130,7 @@ function rowFor(sources: Source[], index: number): string[] {
     COLLECTION_DATE,                                // A
     names[0] || '', names[1] || '', names[2] || '', // B, C, D
     names[3] || '', names[4] || '',                 // E, F
-    `RECON-07MAY-${index + 1}`,                     // G  serial placeholder
+    SERIALS[index],                                 // G  serial (order arbitrary)
     '',                                             // H  colour
     MATURATION_DATE,                                // I
     BATCHING_DATE,                                  // J
@@ -179,6 +200,25 @@ export default async (request: Request, _context: Context) => {
       if (colA === '' && colK === COLLECTION_DATE) malformed.push(i);
     }
 
+    // ── 1b. Placeholder serials to replace with the real ones ─────────────────
+    // The five rows are already in the sheet from the first run, so the serials
+    // have to be patched in place rather than written at insert time. Matching
+    // on the placeholder makes this a no-op once it has run, and means a row
+    // someone has already corrected by hand is left alone.
+    const serialRepairs: Array<{ rowNumber: number; from: string; to: string }> = [];
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i] || [];
+      if ((row[COL_DATE] ?? '').toString().trim() !== COLLECTION_DATE) continue;
+      const serial = (row[COL_SERIAL] ?? '').toString().trim();
+      const m = PLACEHOLDER_RE.exec(serial);
+      if (!m) continue;
+      serialRepairs.push({
+        rowNumber: i + 1,
+        from: serial,
+        to: SERIALS[Number(m[1]) - 1],
+      });
+    }
+
     // ── 2. Already correctly present? ──────────────────────────────────────────
     const alreadyPresent = rows
       .slice(1)
@@ -200,11 +240,28 @@ export default async (request: Request, _context: Context) => {
     const plan = {
       malformedRowsToDelete: malformed.map(i => i + 1), // 1-based, for eyeballing
       alreadyPresent,
+      serialRepairs,
       willInsertAtSheetRow: insertAt + 1,
       rowsToInsert: alreadyPresent > 0 ? 0 : newRows.length,
     };
 
     if (dryRun) return json({ success: true, dryRun: true, ...plan, totalLitres, rows: newRows });
+
+    // ── 3b. Patch the placeholder serials, and the note that explains them ────
+    // Done before any row deletion below, while the indices from the read above
+    // are still valid.
+    if (serialRepairs.length > 0) {
+      await sheets.spreadsheets.values.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          valueInputOption: 'USER_ENTERED',
+          data: serialRepairs.flatMap(r => [
+            { range: `${TAB}!G${r.rowNumber}`, values: [[r.to]] },
+            { range: `${TAB}!L${r.rowNumber}`, values: [[NOTE]] },
+          ]),
+        },
+      });
+    }
 
     // ── 4. Delete the misplaced rows, bottom-up so indices stay valid ──────────
     if (malformed.length > 0) {
@@ -227,6 +284,8 @@ export default async (request: Request, _context: Context) => {
         success: true,
         skipped: true,
         deletedMalformed: malformed.length,
+        serialsRepaired: serialRepairs.length,
+        repairs: serialRepairs,
         message: `${COLLECTION_DATE} already has ${alreadyPresent} correctly-placed row(s) — nothing inserted`,
       });
     }
