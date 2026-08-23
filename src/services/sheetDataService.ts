@@ -53,8 +53,14 @@ function siteInfoKey(businessName: string): string {
   return businessName.trim().toLowerCase();
 }
 
-// Detect if we're in production (Netlify) or development
-function isProduction(): boolean {
+// Detect if we're in production (Netlify) or development.
+//
+// Exported because the same question is asked outside this module: on
+// localhost there are no Netlify Functions to call, so a write path that
+// fires anyway just 404s and queues rubbish for retry. Every write in this
+// file already no-ops in dev; AppContext's maturing-bin write uses this to
+// do the same.
+export function isProduction(): boolean {
   return import.meta.env.PROD || window.location.hostname !== 'localhost';
 }
 

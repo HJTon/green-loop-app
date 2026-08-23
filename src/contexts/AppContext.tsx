@@ -17,6 +17,7 @@ import {
   writePickupNote,
   writeSiteInfo,
   writeManualOverride,
+  isProduction,
 } from '@/services/sheetDataService';
 import { sendReportEmail } from '@/services/emailService';
 import { apiFetch } from '@/utils/apiClient';
@@ -374,6 +375,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       farmName: params.farmName,
       createdAt: new Date().toISOString(),
     };
+
+    // On localhost there is no maturing-bins-write function to call, so the
+    // POST below 404s and the bin lands in the retry queue — a queue that then
+    // drains on every later dev boot and 404s again. Every other write in the
+    // app already no-ops in dev; this one didn't. Report success so the caller
+    // shows the normal "exported" path rather than the offline copy.
+    if (!isProduction()) {
+      console.log('[DEV MODE] Would write maturing bin to Bin Tracker:', entry.bin.serialNumber, entry);
+      return true;
+    }
 
     try {
       const response = await apiFetch('/.netlify/functions/maturing-bins-write', {
