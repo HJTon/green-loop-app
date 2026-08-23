@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Smartphone, Download, Share, Plus, CheckCircle2, Info, RefreshCw, Gift, Trash2, RotateCcw } from 'lucide-react';
+import { Smartphone, Download, Share, Plus, CheckCircle2, Info, RefreshCw, Gift, Trash2, RotateCcw, FlaskConical } from 'lucide-react';
 import { Header } from '@/components/Header';
 import { Button } from '@/components/Button';
 import { useApp } from '@/contexts/AppContext';
@@ -302,6 +302,23 @@ export function SettingsPage() {
                 <RotateCcw size={16} className="mr-1" /> Defaults
               </Button>
             </div>
+          </div>
+        </section>
+
+        {/* Sandbox — try the farm screen without a real day behind it */}
+        <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100">
+            <h2 className="font-semibold text-gray-900">Try the consolidation screen</h2>
+          </div>
+          <div className="p-4">
+            <p className="text-sm text-gray-600 mb-3">
+              Opens the farm consolidation screen on a made-up day (or a real day&apos;s stop list)
+              so you can have a play with it. Nothing is saved, nothing is sent to any sheet, and
+              today&apos;s real collection is untouched.
+            </p>
+            <Button variant="outline" fullWidth onClick={() => navigate('/sandbox')}>
+              <FlaskConical size={16} className="mr-1.5" /> Open sandbox
+            </Button>
           </div>
         </section>
 

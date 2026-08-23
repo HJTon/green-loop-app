@@ -341,3 +341,86 @@ export function isBinReady(bin: MaturingBin): boolean {
   const readyDate = new Date(bin.readyDate);
   return today >= readyDate;
 }
+
+// ── Bin Tracker row preview ─────────────────────────────────────────────────
+// A client-side mirror of what `netlify/functions/maturing-bins-write.ts`
+// builds for the sheet, so the sandbox can show the exact row a bin would
+// produce without anything being written. Kept deliberately close to the
+// function's own code — if the column contract changes there, change it here
+// too (see the "Bin Tracker sheet contract": A date · B–F sources 1–5 ·
+// G serial · H–L filled in later at the farm · M overflow names · N JSON).
+
+export interface SourceBreakdownEntry {
+  name: string;
+  bins: number;
+  buckets: number;
+  litres: number;
+}
+
+export function buildSourceBreakdown(bin: MaturingBin): SourceBreakdownEntry[] {
+  const byName = new Map<string, SourceBreakdownEntry>();
+
+  for (const content of bin.contents) {
+    const capacity =
+      content.collectionType === 'bins' ? BIN_CAPACITY_LITRES : BUCKET_CAPACITY_LITRES;
+    const litres = (content.averageFullness / 100) * capacity * content.binsCount;
+
+    const entry = byName.get(content.businessName) || {
+      name: content.businessName,
+      bins: 0,
+      buckets: 0,
+      litres: 0,
+    };
+    if (content.collectionType === 'bins') entry.bins += content.binsCount;
+    else entry.buckets += content.binsCount;
+    entry.litres += litres;
+    byName.set(content.businessName, entry);
+  }
+
+  return [...byName.values()].map(e => ({ ...e, litres: Math.round(e.litres) }));
+}
+
+// DD-Mon-YYYY, e.g. 29-Dec-2025. Note en-NZ renders September as "Sept".
+export function formatSheetDate(dateStr: string): string {
+  const date = new Date(dateStr);
+  return `${date.getDate()}-${date.toLocaleDateString('en-NZ', { month: 'short' })}-${date.getFullYear()}`;
+}
+
+export const BIN_TRACKER_COLUMNS = [
+  'A Date of collection',
+  'B Content from 1',
+  'C Content from 2',
+  'D Content from 3',
+  'E Content from 4',
+  'F Content from 5',
+  'G Number (serial)',
+  'H Colour',
+  'I Date of maturation',
+  'J Date of batching',
+  'K Build',
+  'L Notes',
+  'M Content from 6+',
+  'N Source breakdown (JSON)',
+] as const;
+
+export function buildBinTrackerRow(bin: MaturingBin): string[] {
+  const uniqueBusinessNames = [...new Set(bin.contents.map(c => c.businessName))];
+  const sources = [0, 1, 2, 3, 4].map(i => uniqueBusinessNames[i] || '');
+
+  return [
+    formatSheetDate(bin.createdDate),
+    sources[0],
+    sources[1],
+    sources[2],
+    sources[3],
+    sources[4],
+    bin.serialNumber,
+    '', // H colour
+    '', // I date of maturation
+    '', // J date of batching
+    '', // K build
+    '', // L notes
+    uniqueBusinessNames.slice(5).join(', '), // M overflow
+    JSON.stringify(buildSourceBreakdown(bin)), // N
+  ];
+}
