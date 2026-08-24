@@ -1,10 +1,22 @@
 import { useRef, useState, useEffect } from 'react';
+import type { ReactNode } from 'react';
 import { Camera, RefreshCw, X } from 'lucide-react';
 import { Button } from '@/components/Button';
 
 interface CameraCaptureProps {
   onCapture: (imageData: string) => void;
   onCancel: () => void;
+  /**
+   * Keep the stream running after a shot instead of tearing it down. Used by
+   * the straight-to-maturation scanner, where you work down a row of bins
+   * without the camera closing and reopening between each one — reacquiring
+   * the stream takes about a second and refocuses every time.
+   */
+  continuous?: boolean;
+  /** Blocks the shutter while the last shot is still being read. */
+  busy?: boolean;
+  /** Caption under the targeting box: what just happened to the last scan. */
+  overlay?: ReactNode;
 }
 
 // The serial-number scan window, as fractions of the video frame. We crop the
@@ -15,7 +27,13 @@ interface CameraCaptureProps {
 const CROP_W_FRAC = 0.82; // a touch wider so digits that drift sideways still land inside
 const CROP_H_FRAC = 0.24;
 
-export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
+export function CameraCapture({
+  onCapture,
+  onCancel,
+  continuous = false,
+  busy = false,
+  overlay,
+}: CameraCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -83,7 +101,9 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
     // Get image data as base64
     const imageData = canvas.toDataURL('image/jpeg', 0.9);
 
-    stopCamera();
+    // In continuous mode the caller reads this shot while the stream stays
+    // live, ready for the next bin.
+    if (!continuous) stopCamera();
     onCapture(imageData);
   };
 
@@ -134,6 +154,11 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
           </div>
         </div>
 
+        {/* Result of the last shot, sat under the box where you're looking */}
+        {overlay && (
+          <div className="absolute inset-x-0 bottom-0 p-2 pointer-events-none">{overlay}</div>
+        )}
+
         {/* Close button */}
         <button
           onClick={() => {
@@ -161,7 +186,8 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       <div className="mt-4 flex justify-center">
         <button
           onClick={handleCapture}
-          className="w-16 h-16 bg-white rounded-full border-4 border-green-primary flex items-center justify-center hover:bg-gray-100 active:scale-95 transition-transform"
+          disabled={busy}
+          className="w-16 h-16 bg-white rounded-full border-4 border-green-primary flex items-center justify-center hover:bg-gray-100 active:scale-95 transition-transform disabled:opacity-40 disabled:active:scale-100"
         >
           <div className="w-12 h-12 bg-green-primary rounded-full" />
         </button>

@@ -393,3 +393,27 @@ export function buildBinTrackerRow(bin: MaturingBin): string[] {
     JSON.stringify(buildSourceBreakdown(bin)), // N
   ];
 }
+
+// ── Matching a scanned serial to something on the truck ──────────────────────
+
+/**
+ * Serials are compared loosely enough to survive how they get written down,
+ * and no looser. Case and punctuation go, and so do leading zeros: the sheet
+ * stores them 7-digit (`4102747`) because Sheets coerces them to numbers,
+ * while the printed labels and Joe's written records are 8-digit
+ * (`04102747`). Nothing fuzzier than that — a near-miss match would put one
+ * business's food waste under another's name on the Bin Tracker, which is
+ * exactly the record nobody can reconstruct afterwards.
+ */
+export function normaliseSerial(serial: string): string {
+  return serial.replace(/[^A-Za-z0-9]/g, '').toUpperCase().replace(/^0+/, '');
+}
+
+export function findTileBySerial(
+  tiles: PickupTile[],
+  scanned: string
+): PickupTile | undefined {
+  const target = normaliseSerial(scanned);
+  if (!target) return undefined;
+  return tiles.find(t => t.serialNumber && normaliseSerial(t.serialNumber) === target);
+}

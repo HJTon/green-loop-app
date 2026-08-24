@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Package, Plus, Check, ArrowDownToLine, Layers, X, AlertCircle } from 'lucide-react';
+import { Package, Plus, Check, ArrowDownToLine, Layers, X, AlertCircle, ScanLine } from 'lucide-react';
 import type { Dispatch, SetStateAction } from 'react';
 import { Button } from '@/components/Button';
 import { SerialNumberModal } from './SerialNumberModal';
+import { ScanBinsModal } from './ScanBinsModal';
 import type { ConsolidationSession, MaturingBin, PickupTile } from '@/types';
 import type { ToastMessage } from '@/components/Toast';
 import {
@@ -69,6 +70,7 @@ export function ConsolidationBoard({
   const [mode, setMode] = useState<Mode>('idle');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [serialPurpose, setSerialPurpose] = useState<SerialPurpose | null>(null);
+  const [scanning, setScanning] = useState(false);
 
   const activeBin = session.maturingBins.find(b => b.id === session.activeBinId) || null;
   const otherBins = session.maturingBins.filter(b => b.id !== session.activeBinId);
@@ -81,7 +83,13 @@ export function ConsolidationBoard({
   const leaveMode = () => {
     setMode('idle');
     setSelected(new Set());
+    setScanning(false);
   };
+
+  // Bins still to sort, in list order — everything the straight-in flow can
+  // act on, whether it's tapped or scanned.
+  const binCandidates = tiles.filter(canHostMaturing);
+  const fullBins = binCandidates.filter(t => t.averageFullness >= 100);
 
   // ── Making a bin out of one of the collected bins ─────────────────────────
   //
@@ -167,13 +175,27 @@ export function ConsolidationBoard({
     });
   };
 
-  const confirmStraightIn = () => {
-    const chosen = tiles.filter(t => selected.has(t.id));
+  /** Tick every full bin at once — the common case on a good day. */
+  const selectAllFull = () => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      for (const tile of fullBins) {
+        if (tile.serialNumber) next.add(tile.id);
+      }
+      return next;
+    });
+  };
+
+  const confirmStraightIn = (ids: Set<string> = selected) => {
+    const chosen = tiles.filter(t => ids.has(t.id));
     if (chosen.length === 0) return;
     for (const tile of chosen) {
       makeBinFromTile(tile.id, undefined, false);
     }
-    addToast('success', `${chosen.length} bin${chosen.length === 1 ? '' : 's'} going in as ${chosen.length === 1 ? 'it is' : 'they are'}`);
+    addToast(
+      'success',
+      `${chosen.length} bin${chosen.length === 1 ? '' : 's'} straight to maturation`
+    );
     leaveMode();
   };
 
@@ -491,8 +513,31 @@ export function ConsolidationBoard({
           <p className="text-xs text-gray-500 mt-0.5">
             Each one gets its own row on the sheet, nothing tipped into it.
           </p>
+
+          {/* Three ways to fill the tick list: scan down the row, take every
+              full bin in one go, or tap them individually below. */}
           <div className="flex gap-2 mt-2.5">
-            <Button fullWidth onClick={confirmStraightIn} disabled={selected.size === 0}>
+            <Button fullWidth onClick={() => setScanning(true)} disabled={binCandidates.length === 0}>
+              <ScanLine size={15} className="mr-1.5" />
+              Scan them
+            </Button>
+            <Button
+              variant="outline"
+              fullWidth
+              onClick={selectAllFull}
+              disabled={fullBins.length === 0}
+            >
+              All {fullBins.length} full
+            </Button>
+          </div>
+
+          <div className="flex gap-2 mt-2">
+            <Button
+              variant="outline"
+              fullWidth
+              onClick={() => confirmStraightIn()}
+              disabled={selected.size === 0}
+            >
               <Check size={15} className="mr-1.5" />
               Done
             </Button>
@@ -570,6 +615,21 @@ export function ConsolidationBoard({
         isOpen={serialPurpose !== null}
         onClose={() => setSerialPurpose(null)}
         onSubmit={handleSerialSubmit}
+      />
+
+      {/* Scanning ticks the same selection the list does, so a scanned bin
+          shows green behind the camera and Done commits the lot either way. */}
+      <ScanBinsModal
+        isOpen={scanning}
+        candidates={binCandidates}
+        selectedIds={selected}
+        totalSelected={selected.size}
+        onHit={tile => setSelected(prev => new Set(prev).add(tile.id))}
+        onClose={() => setScanning(false)}
+        onDone={() => {
+          setScanning(false);
+          confirmStraightIn();
+        }}
       />
     </div>
   );
