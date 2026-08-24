@@ -548,29 +548,6 @@ export function ConsolidationBoard({
         </div>
       )}
 
-      {/* ── Bins finished today — tap to reopen ────────────────────────── */}
-      {otherBins.length > 0 && mode === 'idle' && (
-        <div>
-          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
-            Bins done today — tap to add more
-          </p>
-          <div className="flex flex-wrap gap-1.5">
-            {otherBins.map(bin => (
-              <button
-                key={bin.id}
-                type="button"
-                onClick={() => setActiveBin(bin.id)}
-                className="inline-flex items-center gap-1.5 bg-white border-2 border-gray-200 rounded-full px-3 py-1.5 text-sm hover:border-green-primary active:bg-green-50"
-              >
-                <Package size={13} className="text-gray-400" />
-                <span className="font-mono font-semibold text-gray-800">#{bin.serialNumber}</span>
-                <span className="text-xs text-gray-500">{binItemCount(bin)}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* ── The list ───────────────────────────────────────────────────── */}
       <div>
         <div className="flex items-baseline justify-between mb-1.5">
@@ -610,6 +587,32 @@ export function ConsolidationBoard({
           </p>
         )}
       </div>
+
+      {/* ── Bins finished today — tap to reopen ────────────────────────────
+          Below the list, not above it. While you're filling a bin this strip
+          only grows, and up top it pushed the containers you're actually
+          working through further down the screen with every bin you closed. */}
+      {otherBins.length > 0 && mode === 'idle' && (
+        <div>
+          <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+            Bins done today — tap to add more
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {otherBins.map(bin => (
+              <button
+                key={bin.id}
+                type="button"
+                onClick={() => setActiveBin(bin.id)}
+                className="inline-flex items-center gap-1.5 bg-white border-2 border-gray-200 rounded-full px-3 py-1.5 text-sm hover:border-green-primary active:bg-green-50"
+              >
+                <Package size={13} className="text-gray-400" />
+                <span className="font-mono font-semibold text-gray-800">#{bin.serialNumber}</span>
+                <span className="text-xs text-gray-500">{binItemCount(bin)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <SerialNumberModal
         isOpen={serialPurpose !== null}
