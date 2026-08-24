@@ -199,6 +199,13 @@ export interface MaturingBin {
   farmId: string;
   notes: string;
   status: 'maturing' | 'ready' | 'processed';
+  /**
+   * The collected bin this maturing bin IS — you pick a bin off the truck and
+   * tip the others into it, so its own contents are in there from the moment
+   * it's chosen. Its content row can't be removed without scrapping the whole
+   * bin. Undefined for a spare empty bin whose serial was typed in at the farm.
+   */
+  hostTileId?: string;
 }
 
 // Consolidation session

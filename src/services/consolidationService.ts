@@ -184,119 +184,88 @@ export function getAssignedCount(session: ConsolidationSession): number {
   return session.pickupTiles.filter(tile => tile.isAssigned).length;
 }
 
-// ── Grouping ────────────────────────────────────────────────────────────────
-// A business with 4 bins collected produces 4 tiles. Assigning them one at a
-// time is what made the farm screen slow, so both the "to assign" list and a
-// bin's contents are grouped by business for display and acted on in bulk.
+// ── The flat list ───────────────────────────────────────────────────────────
+// Everything collected is listed as individual containers, not grouped by
+// business. Grouping was a mistake: at the farm you are looking at a pile of
+// physical bins, and what tells two of them apart is the serial on the side
+// and how full it is, not who they came from. One tile per bin/bucket, in the
+// order you actually work through them.
+//
+// Order: wheelie bins first, then soil bins, then buckets — buckets always at
+// the bottom because they get tipped into a bin, never the other way round.
+// Within each, fullest first: a full bin is a candidate to go straight in as
+// it stands, and the dregs are what you use to top one up.
 
-export interface BusinessGroup {
-  key: string;                    // clientId + collection type
-  clientId: string;
-  businessName: string;
-  collectionType: CollectionType;
-  tiles: PickupTile[];            // still unassigned, in pickup order
-  averageFullness: number;
+const CONTAINER_ORDER: Record<CollectionType, number> = {
+  bins: 0,
+  soil: 1,
+  buckets: 2,
+};
+
+export function sortTilesForAssignment(tiles: PickupTile[]): PickupTile[] {
+  return [...tiles].sort((a, b) => {
+    const byType = CONTAINER_ORDER[a.collectionType] - CONTAINER_ORDER[b.collectionType];
+    if (byType !== 0) return byType;
+    const byFullness = b.averageFullness - a.averageFullness;
+    if (byFullness !== 0) return byFullness;
+    const byBusiness = a.businessName.localeCompare(b.businessName);
+    if (byBusiness !== 0) return byBusiness;
+    return a.serialNumber.localeCompare(b.serialNumber);
+  });
 }
 
-export function groupUnassignedTiles(session: ConsolidationSession): BusinessGroup[] {
-  const groups = new Map<string, BusinessGroup>();
-
-  for (const tile of getUnassignedTiles(session)) {
-    const key = `${tile.clientId}-${tile.collectionType}`;
-    const existing = groups.get(key);
-    if (existing) {
-      existing.tiles.push(tile);
-    } else {
-      groups.set(key, {
-        key,
-        clientId: tile.clientId,
-        businessName: tile.businessName,
-        collectionType: tile.collectionType,
-        tiles: [tile],
-        averageFullness: tile.averageFullness,
-      });
-    }
-  }
-
-  // Average fullness across the group, for the badge on the row.
-  return [...groups.values()].map(group => ({
-    ...group,
-    averageFullness: Math.round(
-      group.tiles.reduce((sum, t) => sum + t.averageFullness, 0) / group.tiles.length
-    ),
-  }));
+export function getSortedUnassignedTiles(session: ConsolidationSession): PickupTile[] {
+  return sortTilesForAssignment(getUnassignedTiles(session));
 }
 
-export interface BinContentGroup {
-  key: string;
-  clientId: string;
-  businessName: string;
-  collectionType: CollectionType;
-  count: number;
-  litres: number;
-  contents: ConsolidatedContent[];
+const FULLNESS_LABELS: Record<BinFullness, string> = {
+  full: 'Full',
+  '3-quarter': '3/4 full',
+  half: 'Half full',
+  quarter: '1/4 full',
+};
+
+/** "Full" / "3/4 full" / … for the badge on a tile. */
+export function fullnessLabel(tile: PickupTile): string {
+  const recorded = tile.fullness[0];
+  if (recorded) return FULLNESS_LABELS[recorded];
+  // Older sessions stored only the percentage.
+  if (tile.averageFullness >= 100) return 'Full';
+  if (tile.averageFullness >= 75) return '3/4 full';
+  if (tile.averageFullness >= 50) return 'Half full';
+  return '1/4 full';
 }
 
-export function groupBinContents(bin: MaturingBin): BinContentGroup[] {
-  const groups = new Map<string, BinContentGroup>();
-
-  for (const content of bin.contents) {
-    const key = `${content.clientId}-${content.collectionType}`;
-    const capacity =
-      content.collectionType === 'bins' ? BIN_CAPACITY_LITRES : BUCKET_CAPACITY_LITRES;
-    const litres = (content.averageFullness / 100) * capacity;
-
-    const existing = groups.get(key);
-    if (existing) {
-      existing.count += content.binsCount;
-      existing.litres += litres;
-      existing.contents.push(content);
-    } else {
-      groups.set(key, {
-        key,
-        clientId: content.clientId,
-        businessName: content.businessName,
-        collectionType: content.collectionType,
-        count: content.binsCount,
-        litres,
-        contents: [content],
-      });
-    }
-  }
-
-  return [...groups.values()];
+/** Singular container word for a tile or content row. */
+export function containerLabel(type: CollectionType): string {
+  if (type === 'buckets') return 'bucket';
+  if (type === 'soil') return 'soil bin';
+  return 'bin';
 }
 
-// Which tiles are sitting in this bin for a given business — used to take one
-// back out without hunting for a specific content row.
-export function getBinGroupForClient(
-  bin: MaturingBin,
-  clientId: string,
-  collectionType: CollectionType
-): BinContentGroup | undefined {
-  return groupBinContents(bin).find(
-    g => g.clientId === clientId && g.collectionType === collectionType
-  );
+/**
+ * Maturing has to happen in a wheelie bin, so only those can be the bin that
+ * gets filled (or go straight in as they are). Buckets and soil bins can only
+ * ever be tipped into one.
+ */
+export function canHostMaturing(tile: PickupTile): boolean {
+  return tile.collectionType === 'bins';
 }
 
-// Collected wheelie bins that could become the maturing bin. Buckets can't —
-// maturing has to happen in a wheelie bin.
-export function getSuggestedBinSerials(
-  session: ConsolidationSession
-): Array<{ serial: string; businessName: string }> {
-  const used = new Set(session.maturingBins.map(b => b.serialNumber));
-  const seen = new Set<string>();
-  const suggestions: Array<{ serial: string; businessName: string }> = [];
+/** The contents of a bin, in the same order the assignment list uses. */
+export function sortedBinContents(bin: MaturingBin): ConsolidatedContent[] {
+  return [...bin.contents].sort((a, b) => {
+    const byType = CONTAINER_ORDER[a.collectionType] - CONTAINER_ORDER[b.collectionType];
+    if (byType !== 0) return byType;
+    const byFullness = b.averageFullness - a.averageFullness;
+    if (byFullness !== 0) return byFullness;
+    return a.businessName.localeCompare(b.businessName);
+  });
+}
 
-  for (const tile of session.pickupTiles) {
-    if (tile.collectionType !== 'bins') continue;
-    if (!tile.serialNumber) continue;
-    if (used.has(tile.serialNumber) || seen.has(tile.serialNumber)) continue;
-    seen.add(tile.serialNumber);
-    suggestions.push({ serial: tile.serialNumber, businessName: tile.businessName });
-  }
-
-  return suggestions;
+/** How many physical containers are in a bin, its own contents included. */
+export function binItemCount(bin: MaturingBin): number {
+  return bin.contents.reduce((sum, c) => sum + c.binsCount, 0);
 }
 
 // Format maturing bin data for export
