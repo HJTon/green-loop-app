@@ -14,6 +14,7 @@ import { SplitPlannerPage } from '@/pages/SplitPlannerPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { DebugExportPage } from '@/pages/DebugExportPage';
 import { SandboxPage } from '@/pages/SandboxPage';
+import { ImpactReportsPage } from '@/pages/ImpactReportsPage';
 
 function AppRoutes() {
   const { toasts, dismissToast } = useApp();
@@ -34,6 +35,7 @@ function AppRoutes() {
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/debug/export" element={<DebugExportPage />} />
         <Route path="/sandbox" element={<SandboxPage />} />
+        <Route path="/impact-reports" element={<ImpactReportsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />

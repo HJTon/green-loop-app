@@ -4,6 +4,7 @@ import { MapPin, Trash2, Plus, Minus, Info, Check, Phone, User, Sprout, Gift } f
 import { Header } from '@/components/Header';
 import { Button } from '@/components/Button';
 import { FullnessSelector } from '@/components/FullnessSelector';
+import { ImpactReportLink } from '@/components/ImpactReportLink';
 import { PhotoSection } from '@/components/PhotoSection';
 import { FindBinsSection } from '@/components/FindBinsSection';
 import { ApproachSection } from '@/components/ApproachSection';
@@ -465,6 +466,7 @@ export function PickupPage() {
         {/* Client Info */}
         <div className="bg-white px-4 py-4 border-b border-gray-200">
           <h2 className="text-xl font-bold text-gray-900">{client.business_name}</h2>
+          <ImpactReportLink businessName={client.business_name} />
           <div className="flex items-center gap-1 text-sm text-gray-600 mt-1">
             <MapPin size={14} />
             <span>{client.address || 'No address provided'}</span>
@@ -588,6 +590,7 @@ export function PickupPage() {
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1">
               <h2 className="text-xl font-bold text-gray-900">{client.business_name}</h2>
+          <ImpactReportLink businessName={client.business_name} />
               <div className="flex items-center gap-1 text-sm text-gray-600 mt-1">
                 <MapPin size={14} />
                 <span>{client.address || 'No address provided'}</span>
@@ -785,6 +788,7 @@ export function PickupPage() {
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1">
             <h2 className="text-xl font-bold text-gray-900">{client.business_name}</h2>
+          <ImpactReportLink businessName={client.business_name} />
             <div className="flex items-center gap-1 text-sm text-gray-600 mt-1">
               <MapPin size={14} />
               <span>{client.address || 'No address provided'}</span>

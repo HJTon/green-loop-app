@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Smartphone, Download, Share, Plus, CheckCircle2, Info, RefreshCw, Gift, Trash2, RotateCcw, FlaskConical } from 'lucide-react';
+import { Smartphone, Download, Share, Plus, CheckCircle2, Info, RefreshCw, Gift, Trash2, RotateCcw, FlaskConical, Leaf } from 'lucide-react';
 import { Header } from '@/components/Header';
 import { Button } from '@/components/Button';
 import { useApp } from '@/contexts/AppContext';
@@ -302,6 +302,22 @@ export function SettingsPage() {
                 <RotateCcw size={16} className="mr-1" /> Defaults
               </Button>
             </div>
+          </div>
+        </section>
+
+        {/* Impact reports — each business's diversion + emissions page */}
+        <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100">
+            <h2 className="font-semibold text-gray-900">Business impact reports</h2>
+          </div>
+          <div className="p-4">
+            <p className="text-sm text-gray-600 mb-3">
+              Food waste diverted and emissions avoided for each business, with a PDF they can
+              download. Open one, or share the link with the business.
+            </p>
+            <Button variant="outline" fullWidth onClick={() => navigate('/impact-reports')}>
+              <Leaf size={16} className="mr-1.5" /> Open impact reports
+            </Button>
           </div>
         </section>
 
