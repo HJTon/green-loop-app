@@ -84,7 +84,9 @@ function buildSourceBreakdown(contents: MaturingBinContent[]): SourceBreakdownEn
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr);
   const day = date.getDate();
-  const month = date.toLocaleDateString('en-NZ', { month: 'short' });
+  // en-NZ renders September as "Sept", which Sheets can't parse as a date: it lands as text and
+  // breaks the Date of Maturation formula (#VALUE!). Always use the 3-letter form.
+  const month = date.toLocaleDateString('en-NZ', { month: 'short' }).slice(0, 3);
   const year = date.getFullYear();
   return `${day}-${month}-${year}`;
 }

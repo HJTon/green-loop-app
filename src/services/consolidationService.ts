@@ -349,10 +349,11 @@ export function buildSourceBreakdown(bin: MaturingBin): SourceBreakdownEntry[] {
   return [...byName.values()].map(e => ({ ...e, litres: Math.round(e.litres) }));
 }
 
-// DD-Mon-YYYY, e.g. 29-Dec-2025. Note en-NZ renders September as "Sept".
+// DD-Mon-YYYY, e.g. 29-Dec-2025. en-NZ renders September as "Sept", which Sheets won't
+// parse as a date, so the month is cut to 3 letters.
 export function formatSheetDate(dateStr: string): string {
   const date = new Date(dateStr);
-  return `${date.getDate()}-${date.toLocaleDateString('en-NZ', { month: 'short' })}-${date.getFullYear()}`;
+  return `${date.getDate()}-${date.toLocaleDateString('en-NZ', { month: 'short' }).slice(0, 3)}-${date.getFullYear()}`;
 }
 
 export const BIN_TRACKER_COLUMNS = [
