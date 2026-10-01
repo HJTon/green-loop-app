@@ -1,20 +1,25 @@
 import { useEffect, useState } from 'react';
 import { Leaf } from 'lucide-react';
-import { cachedImpactLinks, fetchImpactLinks, findImpactLink } from '@/services/impactLinksService';
+import { cachedImpactLinks, fetchImpactLinks, findImpactLink, type ImpactLink } from '@/services/impactLinksService';
 
 /** Small "Impact report" link shown under a business name. Renders nothing if the business has no report. */
 export function ImpactReportLink({ businessName }: { businessName: string }) {
-  const [url, setUrl] = useState(() => findImpactLink(cachedImpactLinks(), businessName));
+  // Hold the whole list and look the business up on every render. PickupPage stays mounted
+  // from one stop to the next, so storing the resolved URL would keep showing the previous
+  // stop's report until the (possibly slow, out-in-the-van) refresh came back.
+  const [links, setLinks] = useState<ImpactLink[]>(cachedImpactLinks);
 
   useEffect(() => {
     let live = true;
-    fetchImpactLinks().then((links) => { if (live) setUrl(findImpactLink(links, businessName)); });
+    fetchImpactLinks().then((l) => { if (live) setLinks(l); });
     return () => { live = false; };
-  }, [businessName]);
+  }, []);
 
+  const url = findImpactLink(links, businessName);
   if (!url) return null;
   return (
     <a
+      key={url}
       href={url}
       target="_blank"
       rel="noopener noreferrer"
