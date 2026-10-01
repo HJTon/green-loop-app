@@ -26,7 +26,7 @@ const PHASES_URL = 'https://compostmonitor.netlify.app/.netlify/functions/compos
 
 async function fetchPhaseRows(): Promise<(string | number)[][]> {
   try {
-    const res = await fetch(PHASES_URL, { signal: AbortSignal.timeout(3000) });
+    const res = await fetch(PHASES_URL, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) return [];
     const body = (await res.json()) as { data?: unknown };
     return Array.isArray(body.data) ? (body.data as (string | number)[][]) : [];
