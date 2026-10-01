@@ -262,6 +262,7 @@ export interface MonthRow {
 export interface YearRow extends Omit<MonthRow, 'month'> { year: number }
 export interface PileRow {
   pile: string; batchingDate: string | null; firstCollection: string; lastCollection: string; containers: number;
+  stage?: string; // friendly pile stage, attached by attachPileStages (omitted when unknown)
 }
 
 export interface ImpactReport {
@@ -301,6 +302,35 @@ function addCo2e(a: Acc, kg: number, garden: boolean) {
 function add(a: Acc, b: Acc) { for (const k of Object.keys(a) as (keyof Acc)[]) a[k] += b[k]; }
 function round(a: Acc): Acc {
   return { pickups: a.pickups, bins: r2(a.bins), buckets: r2(a.buckets), litres: r1(a.litres), kg: r1(a.kg), co2eVsLandfillKg: r1(a.co2eVsLandfillKg), co2eLandfillKg: r1(a.co2eLandfillKg), co2eTransportKg: r1(a.co2eTransportKg), co2eVsGreenBinKg: r1(a.co2eVsGreenBinKg), co2eVsLandfillBokashiKg: r1(a.co2eVsLandfillBokashiKg), measuredLitres: r1(a.measuredLitres), estimatedLitres: r1(a.estimatedLitres) };
+}
+
+// ───────────────────────── pile stages ─────────────────────────
+
+const STAGE_LABELS: Record<string, string> = {
+  thermophilic: 'Hot composting',
+  maturation: 'Maturing',
+  grow: 'Finished compost, in use',
+};
+
+/**
+ * Attaches a friendly `stage` to each pile by matching the pile name to a Compost Monitor
+ * "Build Phases" system name (case-insensitive, trimmed; first row per system wins).
+ * `phaseRows` is the raw tab incl. header row. Pure: returns a new report, numbers untouched.
+ */
+export function attachPileStages(report: ImpactReport, phaseRows: Row[]): ImpactReport {
+  const byName = new Map<string, string>();
+  for (const r of phaseRows.slice(1)) {
+    const sys = norm(r?.[0]);
+    if (!sys || byName.has(sys)) continue;
+    byName.set(sys, String(r?.[1] ?? '').trim().toLowerCase() || 'thermophilic'); // blank phase = thermophilic, as in compost-build-phase
+  }
+  return {
+    ...report,
+    piles: report.piles.map((p) => {
+      const label = STAGE_LABELS[byName.get(norm(p.pile)) ?? ''];
+      return label ? { ...p, stage: label } : p;
+    }),
+  };
 }
 
 // ───────────────────────── main calculation ─────────────────────────
