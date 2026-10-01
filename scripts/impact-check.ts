@@ -13,7 +13,7 @@ const rows = listInvoicingBusinesses(inv).map((b) => {
   if (last > today.toISOString().slice(0, 10)) throw new Error(`${b}: collection after today`);
   return {
     business: b, first: r.firstCollection, last: r.latestCollection,
-    litres: r.totals.litres, kg: r.totals.kg, co2eKg: r.totals.co2eVsLandfillKg, vsGreen: r.totals.co2eVsGreenBinKg,
+    litres: r.totals.litres, kg: r.totals.kg, co2eKg: r.totals.co2eVsLandfillKg, vsGreen: r.totals.co2eVsGreenBinKg, bokashi: r.totals.co2eVsLandfillBokashiKg,
     fullPct: r.settings.avgFullnessPct, src: r.settings.fullnessSource, n: r.settings.fullnessMeasuredContainers,
     measPct: r.totals.measuredSharePct, piles: r.piles.length, maturing: r.stillMaturing,
   };

@@ -42,6 +42,11 @@ export const AVOIDED_PER_KG_FOOD = LANDFILL_PART_PER_KG_FOOD + TRANSPORT_LANDFIL
 export const AVOIDED_PER_KG_GARDEN = LANDFILL_PART_PER_KG_GARDEN + TRANSPORT_LANDFILL_PER_KG - GREEN_LOOP_TRANSPORT_KG_CO2E_PER_KG; // 0.63989
 // (b) vs the council food-scraps bin: composting emissions cancel; only the longer trucking leg is avoided
 export const AVOIDED_VS_GREEN_BIN_PER_KG = TRANSPORT_COUNCIL_PER_KG - GREEN_LOOP_TRANSPORT_KG_CO2E_PER_KG; // 0.0315
+// (c) Green Loop's own estimate: the MfE composting factor is the IPCC default of 4 g CH4 (x28 = 0.112)
+// plus 0.24 g N2O (x265 = 0.0636) per kg. Four weeks of bokashi fermentation first should leave very
+// little methane, so this variant drops the methane part and keeps the N2O. Not an official factor.
+export const BOKASHI_COMPOSTING_PER_KG = 0.0636;
+export const BOKASHI_EXTRA_PER_KG = FACTORS.composting - BOKASHI_COMPOSTING_PER_KG; // 0.112
 
 export const SOURCE_URL = 'https://measuringemissionsguide.environment.govt.nz/10_materials_waste.html';
 export const FREIGHT_SOURCE_URL = 'https://measuringemissionsguide.environment.govt.nz/8_freight.html';
@@ -281,8 +286,8 @@ export interface ImpactReport {
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
-interface Acc { pickups: number; bins: number; buckets: number; litres: number; kg: number; co2eVsLandfillKg: number; co2eLandfillKg: number; co2eTransportKg: number; co2eVsGreenBinKg: number; measuredLitres: number; estimatedLitres: number }
-const blank = (): Acc => ({ pickups: 0, bins: 0, buckets: 0, litres: 0, kg: 0, co2eVsLandfillKg: 0, co2eLandfillKg: 0, co2eTransportKg: 0, co2eVsGreenBinKg: 0, measuredLitres: 0, estimatedLitres: 0 });
+interface Acc { pickups: number; bins: number; buckets: number; litres: number; kg: number; co2eVsLandfillKg: number; co2eLandfillKg: number; co2eTransportKg: number; co2eVsGreenBinKg: number; co2eVsLandfillBokashiKg: number; measuredLitres: number; estimatedLitres: number }
+const blank = (): Acc => ({ pickups: 0, bins: 0, buckets: 0, litres: 0, kg: 0, co2eVsLandfillKg: 0, co2eLandfillKg: 0, co2eTransportKg: 0, co2eVsGreenBinKg: 0, co2eVsLandfillBokashiKg: 0, measuredLitres: 0, estimatedLitres: 0 });
 /** Adds the emissions for a mass of waste to an accumulator. */
 function addCo2e(a: Acc, kg: number, garden: boolean) {
   const landfill = kg * (garden ? LANDFILL_PART_PER_KG_GARDEN : LANDFILL_PART_PER_KG_FOOD);
@@ -291,10 +296,11 @@ function addCo2e(a: Acc, kg: number, garden: boolean) {
   a.co2eTransportKg += transport;
   a.co2eVsLandfillKg += landfill + transport - kg * GREEN_LOOP_TRANSPORT_KG_CO2E_PER_KG;
   a.co2eVsGreenBinKg += kg * AVOIDED_VS_GREEN_BIN_PER_KG;
+  a.co2eVsLandfillBokashiKg += landfill + transport - kg * GREEN_LOOP_TRANSPORT_KG_CO2E_PER_KG + (garden ? 0 : kg * BOKASHI_EXTRA_PER_KG); // green waste skips bokashi
 }
 function add(a: Acc, b: Acc) { for (const k of Object.keys(a) as (keyof Acc)[]) a[k] += b[k]; }
 function round(a: Acc): Acc {
-  return { pickups: a.pickups, bins: r2(a.bins), buckets: r2(a.buckets), litres: r1(a.litres), kg: r1(a.kg), co2eVsLandfillKg: r1(a.co2eVsLandfillKg), co2eLandfillKg: r1(a.co2eLandfillKg), co2eTransportKg: r1(a.co2eTransportKg), co2eVsGreenBinKg: r1(a.co2eVsGreenBinKg), measuredLitres: r1(a.measuredLitres), estimatedLitres: r1(a.estimatedLitres) };
+  return { pickups: a.pickups, bins: r2(a.bins), buckets: r2(a.buckets), litres: r1(a.litres), kg: r1(a.kg), co2eVsLandfillKg: r1(a.co2eVsLandfillKg), co2eLandfillKg: r1(a.co2eLandfillKg), co2eTransportKg: r1(a.co2eTransportKg), co2eVsGreenBinKg: r1(a.co2eVsGreenBinKg), co2eVsLandfillBokashiKg: r1(a.co2eVsLandfillBokashiKg), measuredLitres: r1(a.measuredLitres), estimatedLitres: r1(a.estimatedLitres) };
 }
 
 // ───────────────────────── main calculation ─────────────────────────
@@ -453,6 +459,8 @@ export function computeImpact(
         avoidedVsLandfillPerKgFood: Math.round(AVOIDED_PER_KG_FOOD * 1e6) / 1e6,
         avoidedVsLandfillPerKgGarden: Math.round(AVOIDED_PER_KG_GARDEN * 1e6) / 1e6,
         avoidedVsGreenBinPerKg: Math.round(AVOIDED_VS_GREEN_BIN_PER_KG * 1e6) / 1e6,
+        bokashiCompostingKgCo2ePerKg: BOKASHI_COMPOSTING_PER_KG,
+        avoidedVsLandfillBokashiPerKgFood: Math.round((AVOIDED_PER_KG_FOOD + BOKASHI_EXTRA_PER_KG) * 1e6) / 1e6,
       },
       sources: [
         { label: 'NZ Ministry for the Environment, Measuring Emissions Catalogue 2026 (materials and waste)', url: SOURCE_URL },
@@ -467,6 +475,7 @@ export function computeImpact(
         'Headline figure, avoided vs the red bin: (landfill-with-gas-recovery factor + ' + RED_BIN_LANDFILL_KM + ' km trucking to landfill - composting factor) x kg diverted. Garden-waste bins use the garden-waste landfill factor.',
         'Secondary figure, avoided vs the council food-scraps bin: council trucks scraps about ' + COUNCIL_FOOD_SCRAPS_KM + ' km to Hampton Downs for composting, so composting emissions cancel and only that trucking (' + COUNCIL_FOOD_SCRAPS_KM + ' km x ' + TRUCK_KG_CO2E_PER_TONNE_KM + ' kg CO2e per tonne-km) is avoided. The council local collection leg is ignored (electric trucks), which is conservative.',
         'Green Loop collects with an electric van charged from solar panels, so its transport emissions are counted as zero. Our composting still emits ' + FACTORS.composting + ' kg CO2e per kg.',
+        'Bokashi figure (Green Loop estimate, not an official factor): our food waste ferments in bokashi for four weeks before composting, which should leave very little methane. This figure drops the methane part of the composting factor (0.112) and keeps the nitrous oxide part (' + BOKASHI_COMPOSTING_PER_KG + ' kg CO2e per kg), so it is the red-bin figure plus 0.112 kg CO2e per kg. Not yet confirmed by measurement.',
         'Volumes for pickups without a measured record = containers collected x container size x average fullness.',
         'Collections before the invoicing records began (' + (firstInv ?? 'n/a') + ') are estimated from farm bin records, splitting each farm bin equally between the businesses it contained.',
         'Weight is estimated from volume using the kg-per-full-bin density above; it is not weighed.',
