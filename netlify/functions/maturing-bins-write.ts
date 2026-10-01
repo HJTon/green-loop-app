@@ -272,6 +272,10 @@ export default async (request: Request, context: Context) => {
       },
     });
 
+    // Date of Maturation: the same 21-day formula the older rows carry. It used to be pre-filled down
+    // the tab by hand, and rows inserted past the end of it (from 3-Sep-2026) were left blank.
+    rowData[8] = `=IF(ISBLANK(A${rowNumber}),"",A${rowNumber}+21)`;
+
     await sheets.spreadsheets.values.update({
       spreadsheetId,
       range: `${TAB}!A${rowNumber}:N${rowNumber}`,

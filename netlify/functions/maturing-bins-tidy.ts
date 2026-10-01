@@ -16,6 +16,7 @@ import { BUSINESS_LIST_TAB, syncBusinessList } from './_lib/business-list';
 //     are removed. B–F get one shared, warn-only dropdown fed by the hidden "Business List" tab.
 //     H (colour) keeps its list but warns instead of rejecting.
 //  5. Header row: trailing spaces trimmed, bold, frozen. Columns are read by position, never by name.
+//  6. Date of Maturation formula (A+21) filled into rows that had none.
 //
 // Nothing here touches G (serials), K (pile names) or N's values: those need Joe's input first.
 
@@ -88,6 +89,11 @@ export default async (request: Request, _context: Context) => {
       for (const [col, idx] of [['A', 0], ['J', 9]] as const) {
         const fixed = textDateToSheet(r[idx]);
         if (fixed) { writes.push({ range: `'${TAB}'!${col}${rowNo}`, values: [[fixed]] }); dateFixes.push(`${col}${rowNo}: ${String(r[idx])} → ${fixed}`); }
+      }
+      // Rows inserted after the hand-filled formula ran out (3-Sep-2026 on) have no maturation date.
+      if (String(r[0] ?? '').trim() && String(r[8] ?? '').trim() === '') {
+        writes.push({ range: `'${TAB}'!I${rowNo}`, values: [[`=IF(ISBLANK(A${rowNo}),"",A${rowNo}+21)`]] });
+        dateFixes.push(`I${rowNo}: maturation formula added`);
       }
       const before = [1, 2, 3, 4, 5].map((c) => String(r[c] ?? '').trim());
       const serials: string[] = [];
