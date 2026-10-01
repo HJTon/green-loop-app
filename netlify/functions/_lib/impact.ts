@@ -48,6 +48,15 @@ export const AVOIDED_VS_GREEN_BIN_PER_KG = TRANSPORT_COUNCIL_PER_KG - GREEN_LOOP
 export const BOKASHI_COMPOSTING_PER_KG = 0.0636;
 export const BOKASHI_EXTRA_PER_KG = FACTORS.composting - BOKASHI_COMPOSTING_PER_KG; // 0.112
 
+// Where the finished compost goes, shown to customers on the impact report.
+// Food waste is bokashi-fermented, composted, then used on the farm(s) below. Garden ('green' bin type)
+// waste skips bokashi and is composted at the community gardens.
+// TODO: a second farm, Kahu Glen, will be added to `food` later. Do NOT list it yet.
+export const COMPOST_DESTINATIONS: { food: string[]; garden: string[] } = {
+  food: ['Eudaimonia farm'],
+  garden: ['Marfell Community Gardens'],
+};
+
 export const SOURCE_URL = 'https://measuringemissionsguide.environment.govt.nz/10_materials_waste.html';
 export const FREIGHT_SOURCE_URL = 'https://measuringemissionsguide.environment.govt.nz/8_freight.html';
 
@@ -280,6 +289,8 @@ export interface ImpactReport {
   latestCollection: string | null;
   piles: PileRow[];
   stillMaturing: number;
+  /** Where this business's compost goes: 'garden' only if ALL its invoicing collections are 'green' bins. */
+  compostDestination: { kind: 'food' | 'garden'; names: string[] };
   methodology: Record<string, unknown>;
   generatedAt: string;
 }
@@ -472,6 +483,9 @@ export function computeImpact(
     latestCollection: dates[dates.length - 1] ?? null,
     piles,
     stillMaturing,
+    compostDestination: pickups.length > 0 && pickups.every((p) => containerKind(p.binType).garden)
+      ? { kind: 'garden', names: COMPOST_DESTINATIONS.garden }
+      : { kind: 'food', names: COMPOST_DESTINATIONS.food },
     methodology: {
       litresPerBin: BIN_CAPACITY_LITRES,
       litresPerBucket: BUCKET_CAPACITY_LITRES,

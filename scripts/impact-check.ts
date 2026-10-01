@@ -34,3 +34,10 @@ if (phasesPath) {
   console.log('matched:', [...seen].filter(([, s]) => s).map(([p, s]) => `${p}=${s}`).join(', '));
   console.log('unmatched:', [...seen].filter(([, s]) => !s).map(([p]) => p).join(', '));
 }
+
+if (process.argv[6] === 'dest') {
+  for (const b of listInvoicingBusinesses(inv)) {
+    const r = computeImpact(inv, bt, { business: b, aliases: SEED_ALIASES[b.toLowerCase()] ?? [] }, today);
+    if (r.compostDestination.kind === 'garden') console.log('garden business:', b);
+  }
+}
