@@ -270,7 +270,13 @@ export interface MonthRow {
 }
 export interface YearRow extends Omit<MonthRow, 'month'> { year: number }
 export interface PileRow {
-  pile: string; batchingDate: string | null; firstCollection: string; lastCollection: string; containers: number;
+  pile: string; batchingDate: string | null; firstCollection: string; lastCollection: string;
+  /** Bins + buckets of this business's own that went in (from measured farm records); null when only older, unmeasured records exist. */
+  containers: number | null;
+  /** This business's litres in the pile. */
+  litres: number;
+  /** True if any of those litres are estimated (farm records before measured volumes began). */
+  estimated: boolean;
   stage?: string; // friendly pile stage, attached by attachPileStages (omitted when unknown)
 }
 
@@ -445,22 +451,36 @@ export function computeImpact(
   const tr = round(total);
 
   // Piles
-  const pileMap = new Map<string, { batching: string | null; first: string; last: string; n: number }>();
+  // A farm bin often holds several businesses' waste, so a pile is reported as this business's
+  // own bins/buckets and litres (from the measured col N breakdown), not as a share of farm bins:
+  // "0.1 of a bin" read like a fullness reading and confused people. Older rows with no breakdown
+  // fall back to an equal split of the farm bin, estimated in litres only.
+  const pileMap = new Map<string, { batching: string | null; first: string; last: string; containers: number | null; litres: number; estimated: boolean }>();
   let stillMaturing = 0;
   for (const t of tracker) {
     const mine = t.names.filter((n) => names.has(norm(n))).length;
-    if (!mine) continue;
+    const myEntries = t.entries.filter((e) => names.has(norm(e.name)));
+    if (!mine && !myEntries.length) continue;
     if (!t.pile) { stillMaturing += 1; continue; }
-    const share = mine / t.names.length;
-    const p = pileMap.get(t.pile) ?? { batching: null, first: t.date, last: t.date, n: 0 };
-    p.n += share;
+    const p = pileMap.get(t.pile) ?? { batching: null, first: t.date, last: t.date, containers: null, litres: 0, estimated: false };
+    if (myEntries.length) {
+      for (const e of myEntries) {
+        p.containers = (p.containers ?? 0) + (Number(e.bins) || 0) + (Number(e.buckets) || 0);
+        p.litres += Number(e.litres) || 0;
+        if (e.estimated) p.estimated = true;
+      }
+    } else {
+      p.litres += (mine / t.names.length) * BIN_CAPACITY_LITRES * fleet.fullness;
+      p.estimated = true;
+    }
     if (t.batchingDate && (!p.batching || t.batchingDate < p.batching)) p.batching = t.batchingDate;
     if (t.date < p.first) p.first = t.date;
     if (t.date > p.last) p.last = t.date;
     pileMap.set(t.pile, p);
   }
   const piles: PileRow[] = [...pileMap].map(([pile, p]) => ({
-    pile, batchingDate: p.batching, firstCollection: p.first, lastCollection: p.last, containers: r2(p.n),
+    pile, batchingDate: p.batching, firstCollection: p.first, lastCollection: p.last,
+    containers: p.containers == null ? null : r2(p.containers), litres: Math.round(p.litres), estimated: p.estimated,
   })).sort((a, b) => (b.batchingDate ?? b.lastCollection).localeCompare(a.batchingDate ?? a.lastCollection));
 
   dates.sort();
