@@ -32,3 +32,17 @@ export function getTodayRoute(): Route {
 export function getFarmById(id: string): Farm | undefined {
   return farms.find(f => f.id === id);
 }
+
+// Resolve a route's destination farm defensively — the given id may be null,
+// undefined, unknown, or point at an inactive farm (e.g. a placeholder like
+// Chauncy's Place). In any of those cases we fall back to the first active
+// farm, so downstream code (drop-off, consolidation, Bin Tracker writer)
+// still has somewhere to send bins. Returns undefined only if there are no
+// active farms at all.
+export function resolveDestinationFarm(id: string | null | undefined): Farm | undefined {
+  if (id) {
+    const match = farms.find(f => f.id === id);
+    if (match?.active) return match;
+  }
+  return farms.find(f => f.active);
+}

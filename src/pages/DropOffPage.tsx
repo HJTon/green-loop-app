@@ -7,7 +7,7 @@ import { ReportSection } from '@/components/ReportSection';
 import { ConsolidationBoard } from '@/components/consolidation/ConsolidationBoard';
 import { ConsolidationProgress } from '@/components/consolidation/ConsolidationProgress';
 import { useApp } from '@/contexts/AppContext';
-import { getFarmById } from '@/utils/data';
+import { resolveDestinationFarm } from '@/utils/data';
 import {
   generateId,
   getCurrentDate,
@@ -26,7 +26,7 @@ export function DropOffPage() {
   const navigate = useNavigate();
   const { collector, route, pickups, dropOff, completeDropOff, sheetClients, addToast, queueEmailSend, queueMaturingBinWrite } = useApp();
 
-  const farm = route?.destination_farm_id ? getFarmById(route.destination_farm_id) : undefined;
+  const farm = resolveDestinationFarm(route?.destination_farm_id);
 
   // Calculate totals from today's pickups
   const completedPickups = pickups.filter(p => p.status === 'completed');

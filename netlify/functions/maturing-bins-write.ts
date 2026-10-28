@@ -168,7 +168,7 @@ export default async (request: Request, context: Context) => {
     }
 
     const body: WriteRequest = await request.json();
-    const { bin, collectorName } = body;
+    const { bin, collectorName, farmName } = body;
 
     if (!bin || !bin.serialNumber) {
       return new Response(JSON.stringify({ error: 'Missing required fields: bin, serialNumber' }), {
@@ -198,13 +198,14 @@ export default async (request: Request, context: Context) => {
 
     const collectionDate = formatDate(bin.createdDate);
 
-    // Prepare row data to match current Bin Tracker columns (updated 2026-08-13):
+    // Prepare row data to match current Bin Tracker columns (updated 2026-10-29):
     // A: Date of collection
     // B–F: Content from (sources 1–5)
     // G: Number (bin serial)
     // H–L: Left blank — colour / maturation / batching / batch / notes, filled in later
     // M: Content from 6+ (overflow names)
     // N: Source breakdown (JSON)
+    // O: Farm (destination farm the bin was dropped at — "Eudaimonia", "Kahu Glen", etc.)
     const rowData = [
       collectionDate,
       sources[0],
@@ -220,6 +221,7 @@ export default async (request: Request, context: Context) => {
       '', // L notes
       overflowSources,
       JSON.stringify(breakdown),
+      farmName || '', // O farm name
     ];
 
     // ─── Placement, not `values.append` ───────────────────────────────────────
@@ -278,7 +280,7 @@ export default async (request: Request, context: Context) => {
 
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `${TAB}!A${rowNumber}:N${rowNumber}`,
+      range: `${TAB}!A${rowNumber}:O${rowNumber}`,
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [rowData] },
     });

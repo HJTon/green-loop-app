@@ -6,7 +6,7 @@ import { Button } from '@/components/Button';
 import { ConsolidationBoard } from '@/components/consolidation/ConsolidationBoard';
 import { ConsolidationProgress } from '@/components/consolidation/ConsolidationProgress';
 import { useApp } from '@/contexts/AppContext';
-import { getFarmById } from '@/utils/data';
+import { resolveDestinationFarm } from '@/utils/data';
 import type { ConsolidationSession } from '@/types';
 import {
   createPickupTilesFromPickups,
@@ -28,7 +28,7 @@ export function ConsolidationPage() {
   const [session, setSession] = useState<ConsolidationSession | null>(null);
   const [isExporting, setIsExporting] = useState(false);
 
-  const farm = route?.destination_farm_id ? getFarmById(route.destination_farm_id) : undefined;
+  const farm = resolveDestinationFarm(route?.destination_farm_id);
 
   // Initialize or restore session
   useEffect(() => {

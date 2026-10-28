@@ -41,6 +41,12 @@
     "address": "274 Korito Road, New Plymouth",
     "matchedAs": "274, Korito Road, New Plymouth, New Plymouth District, Taranaki, 4371, New Zealand / Aotearoa"
   },
+  "farm:3": {
+    "lat": -39.044,
+    "lng": 174.154,
+    "address": "Paraite Road, RD 3, Taranaki",
+    "matchedAs": "Paraite locality centroid, New Plymouth District, Taranaki, 4373, New Zealand / Aotearoa (Nominatim/Photon blocked from sandbox; coord taken from Wikipedia-sourced Paraite centroid pending in-app re-geocode)"
+  },
   "start:envirohub": {
     "lat": -39.069446,
     "lng": 174.0823865,

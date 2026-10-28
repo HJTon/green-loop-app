@@ -15,6 +15,15 @@
     "contact_phone": "",
     "address": "TBD",
     "delivery_notes": "",
+    "active": false
+  },
+  {
+    "id": "3",
+    "farm_name": "Kahu Glen",
+    "contact_name": "",
+    "contact_phone": "",
+    "address": "Paraite Road, RD 3, Taranaki",
+    "delivery_notes": "",
     "active": true
   }
 ]

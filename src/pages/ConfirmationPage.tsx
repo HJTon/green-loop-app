@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { CheckCircle, Edit, ArrowRight, Truck, MapPin } from 'lucide-react';
 import { Button } from '@/components/Button';
 import { useApp } from '@/contexts/AppContext';
-import { getFarmById } from '@/utils/data';
+import { resolveDestinationFarm } from '@/utils/data';
 import { getPickupByClientAndDate, getCurrentDate } from '@/utils/storage';
 
 export function ConfirmationPage() {
@@ -14,7 +14,7 @@ export function ConfirmationPage() {
   const client = clientId ? getClientById(clientId) : undefined;
   const pickup = clientId ? getPickupByClientAndDate(clientId, getCurrentDate()) : null;
   const allComplete = completedCount === totalStops;
-  const destinationFarm = route?.destination_farm_id ? getFarmById(route.destination_farm_id) : undefined;
+  const destinationFarm = resolveDestinationFarm(route?.destination_farm_id);
 
   // Find next pending stop
   const nextStop = route?.stops

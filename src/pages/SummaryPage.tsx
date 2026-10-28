@@ -4,7 +4,7 @@ import { Trophy, Truck, Trash2, AlertTriangle, Download, ArrowLeft, X } from 'lu
 import { Header } from '@/components/Header';
 import { Button } from '@/components/Button';
 import { useApp } from '@/contexts/AppContext';
-import { clients, collectors, farms, getFarmById } from '@/utils/data';
+import { clients, collectors, farms, resolveDestinationFarm } from '@/utils/data';
 import { exportTodayData } from '@/utils/export';
 import { getPendingNotes, getPendingMaturingBins } from '@/utils/storage';
 
@@ -14,7 +14,7 @@ export function SummaryPage() {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [csvExported, setCsvExported] = useState(false);
 
-  const destinationFarm = route?.destination_farm_id ? getFarmById(route.destination_farm_id) : undefined;
+  const destinationFarm = resolveDestinationFarm(route?.destination_farm_id);
 
   const todayPickups = pickups;
   const completedPickups = todayPickups.filter(p => p.status === 'completed');
