@@ -1,13 +1,39 @@
 import { useRef, useState, useEffect } from 'react';
+import type { ReactNode } from 'react';
 import { Camera, RefreshCw, X } from 'lucide-react';
 import { Button } from '@/components/Button';
 
 interface CameraCaptureProps {
   onCapture: (imageData: string) => void;
   onCancel: () => void;
+  /**
+   * Keep the stream running after a shot instead of tearing it down. Used by
+   * the straight-to-maturation scanner, where you work down a row of bins
+   * without the camera closing and reopening between each one — reacquiring
+   * the stream takes about a second and refocuses every time.
+   */
+  continuous?: boolean;
+  /** Blocks the shutter while the last shot is still being read. */
+  busy?: boolean;
+  /** Caption under the targeting box: what just happened to the last scan. */
+  overlay?: ReactNode;
 }
 
-export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
+// The serial-number scan window, as fractions of the video frame. We crop the
+// captured image to exactly this region before sending it to OCR so that a
+// duplicate sticker above the bin (or a reflection) outside the box can't get
+// read in and double the number. The on-screen guide uses the same fractions
+// so what the driver frames is what we actually scan.
+const CROP_W_FRAC = 0.82; // a touch wider so digits that drift sideways still land inside
+const CROP_H_FRAC = 0.24;
+
+export function CameraCapture({
+  onCapture,
+  onCancel,
+  continuous = false,
+  busy = false,
+  overlay,
+}: CameraCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
@@ -57,17 +83,27 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
 
     if (!context) return;
 
-    // Set canvas size to match video
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    // Crop to the targeting box (centred) rather than the whole frame, so only
+    // the number inside the guide is sent to OCR.
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    const sw = Math.round(vw * CROP_W_FRAC);
+    const sh = Math.round(vh * CROP_H_FRAC);
+    const sx = Math.round((vw - sw) / 2);
+    const sy = Math.round((vh - sh) / 2);
 
-    // Draw the current frame
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.width = sw;
+    canvas.height = sh;
+
+    // Draw only the cropped source region into the canvas
+    context.drawImage(video, sx, sy, sw, sh, 0, 0, sw, sh);
 
     // Get image data as base64
     const imageData = canvas.toDataURL('image/jpeg', 0.9);
 
-    stopCamera();
+    // In continuous mode the caller reads this shot while the stream stays
+    // live, ready for the next bin.
+    if (!continuous) stopCamera();
     onCapture(imageData);
   };
 
@@ -106,14 +142,22 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
           className="w-full h-auto"
         />
 
-        {/* Overlay with targeting guide */}
+        {/* Overlay with targeting guide — same fractions as the crop region */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="border-2 border-white/50 rounded-lg w-3/4 h-16 flex items-center justify-center">
-            <span className="text-white/70 text-sm bg-black/30 px-2 py-1 rounded">
-              Align serial number here
+          <div
+            className="border-2 border-white/70 rounded-lg flex items-center justify-center"
+            style={{ width: `${CROP_W_FRAC * 100}%`, height: `${CROP_H_FRAC * 100}%` }}
+          >
+            <span className="text-white/80 text-xs text-center bg-black/40 px-2 py-1 rounded">
+              Fill the box with just the number
             </span>
           </div>
         </div>
+
+        {/* Result of the last shot, sat under the box where you're looking */}
+        {overlay && (
+          <div className="absolute inset-x-0 bottom-0 p-2 pointer-events-none">{overlay}</div>
+        )}
 
         {/* Close button */}
         <button
@@ -142,7 +186,8 @@ export function CameraCapture({ onCapture, onCancel }: CameraCaptureProps) {
       <div className="mt-4 flex justify-center">
         <button
           onClick={handleCapture}
-          className="w-16 h-16 bg-white rounded-full border-4 border-green-primary flex items-center justify-center hover:bg-gray-100 active:scale-95 transition-transform"
+          disabled={busy}
+          className="w-16 h-16 bg-white rounded-full border-4 border-green-primary flex items-center justify-center hover:bg-gray-100 active:scale-95 transition-transform disabled:opacity-40 disabled:active:scale-100"
         >
           <div className="w-12 h-12 bg-green-primary rounded-full" />
         </button>

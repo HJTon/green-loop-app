@@ -4,7 +4,7 @@
     "farm_name": "Eudaimonia",
     "contact_name": "",
     "contact_phone": "",
-    "address": "274 Korito Road",
+    "address": "274 Korito Road, New Plymouth",
     "delivery_notes": "",
     "active": true
   },
@@ -14,6 +14,15 @@
     "contact_name": "",
     "contact_phone": "",
     "address": "TBD",
+    "delivery_notes": "",
+    "active": false
+  },
+  {
+    "id": "3",
+    "farm_name": "Kahu Glen",
+    "contact_name": "",
+    "contact_phone": "",
+    "address": "Paraite Road, RD 3, Taranaki",
     "delivery_notes": "",
     "active": true
   }

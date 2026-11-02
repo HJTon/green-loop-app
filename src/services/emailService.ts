@@ -1,10 +1,12 @@
 import type { PickupReport } from '@/types';
+import { apiFetch } from '@/utils/apiClient';
 
 interface SendReportEmailParams {
   businessName: string;
   collectorName: string;
   reportType: 'pickup' | 'dropoff';
   report: PickupReport;
+  photos?: string[];
 }
 
 /**
@@ -16,6 +18,7 @@ export async function sendReportEmail({
   collectorName,
   reportType,
   report,
+  photos = [],
 }: SendReportEmailParams): Promise<boolean> {
   // Don't send if no actual report content
   if (!report.issue || report.issue.trim() === '') {
@@ -35,7 +38,7 @@ export async function sendReportEmail({
       minute: '2-digit',
     });
 
-    const response = await fetch('/.netlify/functions/send-report-email', {
+    const response = await apiFetch('/.netlify/functions/send-report-email', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -48,6 +51,8 @@ export async function sendReportEmail({
         issue: report.issue,
         date,
         time,
+        photos,
+        recipients: report.recipients || [],
       }),
     });
 

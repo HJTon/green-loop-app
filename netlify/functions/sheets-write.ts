@@ -1,5 +1,6 @@
 import type { Context } from '@netlify/functions';
 import { google } from 'googleapis';
+import { checkAuth, corsHeaders, preflightResponse } from './_lib/auth';
 
 // Initialize Google Sheets API with service account credentials
 function getGoogleSheetsClient() {
@@ -33,15 +34,12 @@ interface WriteRequest {
 export default async (request: Request, context: Context) => {
   // Handle CORS preflight
   if (request.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-      },
-    });
+    return preflightResponse();
   }
+
+  // Auth check (skipped for OPTIONS above).
+  const authFail = checkAuth(request);
+  if (authFail) return authFail;
 
   if (request.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
@@ -92,10 +90,7 @@ export default async (request: Request, context: Context) => {
       range,
     }), {
       status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-      },
+      headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
     });
   } catch (error) {
     console.error('Error writing to sheet:', error);
@@ -104,10 +99,7 @@ export default async (request: Request, context: Context) => {
       details: error instanceof Error ? error.message : 'Unknown error',
     }), {
       status: 500,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-      },
+      headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
     });
   }
 };

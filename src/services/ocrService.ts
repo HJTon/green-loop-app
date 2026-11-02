@@ -1,3 +1,5 @@
+import { apiFetch } from '@/utils/apiClient';
+
 export interface OcrResult {
   text: string;
   confidence: number;
@@ -7,7 +9,7 @@ export interface OcrResult {
 // Recognize serial number from image using Google Cloud Vision API
 export async function recognizeSerialNumber(imageData: string): Promise<OcrResult> {
   try {
-    const response = await fetch('/.netlify/functions/ocr-vision', {
+    const response = await apiFetch('/.netlify/functions/ocr-vision', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
