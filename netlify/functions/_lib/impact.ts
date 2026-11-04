@@ -49,13 +49,15 @@ export const BOKASHI_COMPOSTING_PER_KG = 0.0636;
 export const BOKASHI_EXTRA_PER_KG = FACTORS.composting - BOKASHI_COMPOSTING_PER_KG; // 0.112
 
 // Where the finished compost goes, shown to customers on the impact report.
-// Food waste is bokashi-fermented, composted, then used on the farm(s) below. Garden ('green' bin type)
-// waste skips bokashi and is composted at the community gardens.
-// TODO: a second farm, Kahu Glen, will be added to `food` later. Do NOT list it yet.
+// Food waste is bokashi-fermented, composted, then used on the farm its bins were dropped at (Bin
+// Tracker col O). `food` is the fallback for a business with no Bin Tracker rows yet. Garden ('green'
+// bin type) waste skips bokashi and is composted at the community gardens.
 export const COMPOST_DESTINATIONS: { food: string[]; garden: string[] } = {
   food: ['Eudaimonia farm'],
   garden: ['Marfell Community Gardens'],
 };
+// Col O was added 2026-10-29; every row before it went to Eudaimonia, so a blank cell means Eudaimonia.
+export const DEFAULT_FARM = 'Eudaimonia';
 
 export const SOURCE_URL = 'https://measuringemissionsguide.environment.govt.nz/10_materials_waste.html';
 export const FREIGHT_SOURCE_URL = 'https://measuringemissionsguide.environment.govt.nz/8_freight.html';
@@ -197,6 +199,7 @@ export interface TrackerRow {
   pile: string; // col K ('' if none)
   batchingDate: string | null; // col J
   entries: TrackerEntry[]; // col N
+  farm: string; // col O, blank = DEFAULT_FARM
 }
 
 export function parseBinTracker(rows: Row[]): TrackerRow[] {
@@ -236,7 +239,8 @@ export function parseBinTracker(rows: Row[]): TrackerRow[] {
         }
       } catch { /* malformed JSON: treat as no measurements */ }
     }
-    out.push({ date, names, pile, batchingDate: parseDate(r[9]), entries });
+    const farm = String(r[14] ?? '').trim() || DEFAULT_FARM;
+    out.push({ date, names, pile, batchingDate: parseDate(r[9]), entries, farm });
   }
   return out;
 }
@@ -457,10 +461,12 @@ export function computeImpact(
   // fall back to an equal split of the farm bin, estimated in litres only.
   const pileMap = new Map<string, { batching: string | null; first: string; last: string; containers: number | null; litres: number; estimated: boolean }>();
   let stillMaturing = 0;
+  const farms = new Set<string>(); // every farm this business's bins went to, in date order
   for (const t of tracker) {
     const mine = t.names.filter((n) => names.has(norm(n))).length;
     const myEntries = t.entries.filter((e) => names.has(norm(e.name)));
     if (!mine && !myEntries.length) continue;
+    farms.add(t.farm);
     if (!t.pile) { stillMaturing += 1; continue; }
     const p = pileMap.get(t.pile) ?? { batching: null, first: t.date, last: t.date, containers: null, litres: 0, estimated: false };
     if (myEntries.length) {
@@ -505,7 +511,7 @@ export function computeImpact(
     stillMaturing,
     compostDestination: pickups.length > 0 && pickups.every((p) => containerKind(p.binType).garden)
       ? { kind: 'garden', names: COMPOST_DESTINATIONS.garden }
-      : { kind: 'food', names: COMPOST_DESTINATIONS.food },
+      : { kind: 'food', names: farms.size ? [...farms].map((f) => `${f} farm`) : COMPOST_DESTINATIONS.food },
     methodology: {
       litresPerBin: BIN_CAPACITY_LITRES,
       litresPerBucket: BUCKET_CAPACITY_LITRES,
