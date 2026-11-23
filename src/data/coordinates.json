@@ -76,5 +76,17 @@
     "lng": 174.0781403,
     "address": "97 Courtenay Street, New Plymouth",
     "matchedAs": "97 Courtenay Street, East End, New Plymouth (via Photon geocoder)"
+  },
+  "Mikes Brewery": {
+    "lat": -39.0574971,
+    "lng": 174.0754975,
+    "address": "40 Devon Street East, New Plymouth",
+    "matchedAs": "40, Devon Street East, Strandon, New Plymouth, 4310 (Mike's Brewery Bistro) — OSM Nominatim 2026-11-23"
+  },
+  "Envirohub": {
+    "lat": -39.069446,
+    "lng": 174.0823865,
+    "address": "28 Brooklands Park Drive, New Plymouth",
+    "matchedAs": "Same place as the depot (start:envirohub) — bins collected at the start of the day"
   }
 }

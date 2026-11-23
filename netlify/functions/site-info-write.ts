@@ -3,14 +3,18 @@ import { checkAuth, corsHeaders, preflightResponse } from './_lib/auth';
 
 // Upsert a row in the "Site Info" tab (created on first write), keyed by
 // business name. Columns: A Business Name | B Find Instructions | C Media URLs | D Approach Note
+// | E Preferred Farm. A normal save writes A–D and leaves E alone; a farmOnly save
+// writes just E (so the two editors never clobber each other).
 const TAB_NAME = 'Site Info';
-const HEADER = ['Business Name', 'Find Instructions', 'Media URLs', 'Approach Note'];
+const HEADER = ['Business Name', 'Find Instructions', 'Media URLs', 'Approach Note', 'Preferred Farm'];
 
 interface WriteRequest {
   businessName: string;
   instructions?: string;
   media?: string[];
   approach_from?: string;
+  preferred_farm?: string;
+  farmOnly?: boolean;
 }
 
 function getGoogleSheetsClient() {
@@ -36,7 +40,7 @@ async function ensureTab(sheets: Sheets, spreadsheetId: string): Promise<void> {
   });
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: `${TAB_NAME}!A1:D1`,
+    range: `${TAB_NAME}!A1:E1`,
     valueInputOption: 'RAW',
     requestBody: { values: [HEADER] },
   });
@@ -92,6 +96,37 @@ export default async (request: Request) => {
         rowIndex = i + 1;
         break;
       }
+    }
+
+    if (body.farmOnly) {
+      const farm = (body.preferred_farm || '').trim();
+      // Older tabs were created with a 4-column header — make sure E1 is labelled.
+      await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range: `${TAB_NAME}!E1`,
+        valueInputOption: 'RAW',
+        requestBody: { values: [['Preferred Farm']] },
+      });
+      if (rowIndex > 0) {
+        await sheets.spreadsheets.values.update({
+          spreadsheetId,
+          range: `${TAB_NAME}!E${rowIndex}`,
+          valueInputOption: 'RAW',
+          requestBody: { values: [[farm]] },
+        });
+      } else {
+        await sheets.spreadsheets.values.append({
+          spreadsheetId,
+          range: `${TAB_NAME}!A:E`,
+          valueInputOption: 'RAW',
+          insertDataOption: 'INSERT_ROWS',
+          requestBody: { values: [[businessName, '', '', '', farm]] },
+        });
+      }
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { ...corsHeaders(), 'Content-Type': 'application/json' },
+      });
     }
 
     const rowValues = [businessName, instructions, media, approach_from];

@@ -12,6 +12,7 @@ import {
   getDatesWithPickups
 } from '@/utils/csvParser';
 import { apiFetch } from '@/utils/apiClient';
+import { resolvePreferredFarmId, farmForClient, isLockedFarm } from '@/utils/farmAssignment';
 
 // Column indices (0-based) — matches the `invoicing` tab layout.
 // Column B ("Invoice Name") is used only by the Xero invoice script, not here,
@@ -46,7 +47,8 @@ let cachedDateColumns: DateColumn[] | null = null;
 let cachedHeaders: string[] | null = null;
 
 // Per-site "how to find the bins" help, keyed by normalised business name.
-interface SiteInfo { instructions: string; media: string[]; approach_from: string; }
+// preferred_farm is col E — a farm name ("Eudaimonia" / "Kahu Glen"), blank = use the default list.
+interface SiteInfo { instructions: string; media: string[]; approach_from: string; preferred_farm: string; }
 let cachedSiteInfo: Map<string, SiteInfo> = new Map();
 
 function siteInfoKey(businessName: string): string {
@@ -174,7 +176,8 @@ async function loadSiteInfo(): Promise<void> {
         .map(s => s.trim())
         .filter(Boolean);
       const approach_from = rows[i]?.[3] || '';
-      cachedSiteInfo.set(siteInfoKey(name), { instructions, media, approach_from });
+      const preferred_farm = (rows[i]?.[4] || '').trim();
+      cachedSiteInfo.set(siteInfoKey(name), { instructions, media, approach_from, preferred_farm });
     }
     console.log(`Loaded site info for ${cachedSiteInfo.size} site(s)`);
   } catch (error) {
@@ -186,7 +189,7 @@ async function loadSiteInfo(): Promise<void> {
  * Look up cached site info for a business name (empty if none recorded).
  */
 function getSiteInfoFor(businessName: string): SiteInfo {
-  return cachedSiteInfo.get(siteInfoKey(businessName)) || { instructions: '', media: [], approach_from: '' };
+  return cachedSiteInfo.get(siteInfoKey(businessName)) || { instructions: '', media: [], approach_from: '', preferred_farm: '' };
 }
 
 /**
@@ -200,7 +203,8 @@ export async function writeSiteInfo(
   approach_from: string
 ): Promise<void> {
   // Optimistically update the cache regardless of environment.
-  cachedSiteInfo.set(siteInfoKey(businessName), { instructions, media, approach_from });
+  const prev = getSiteInfoFor(businessName);
+  cachedSiteInfo.set(siteInfoKey(businessName), { ...prev, instructions, media, approach_from });
 
   if (!isProduction()) {
     console.log('[DEV MODE] Would write Site Info for', businessName, { instructions, media, approach_from });
@@ -216,6 +220,31 @@ export async function writeSiteInfo(
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw new Error(error.details || error.error || 'Failed to write Site Info');
+  }
+}
+
+/**
+ * Set a business's preferred farm (Site Info col E, stored as the farm name;
+ * '' clears it back to the default list). Only col E is touched.
+ */
+export async function writePreferredFarm(businessName: string, farmName: string): Promise<void> {
+  const prev = getSiteInfoFor(businessName);
+  cachedSiteInfo.set(siteInfoKey(businessName), { ...prev, preferred_farm: farmName });
+
+  if (!isProduction()) {
+    console.log('[DEV MODE] Would write Preferred Farm for', businessName, '=', farmName);
+    return;
+  }
+
+  const response = await apiFetch('/.netlify/functions/site-info-write', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ businessName, preferred_farm: farmName, farmOnly: true }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.details || error.error || 'Failed to save preferred farm');
   }
 }
 
@@ -498,6 +527,7 @@ export function transformToClient(pickup: SheetPickup): Client {
     find_instructions: site.instructions,
     find_media: site.media,
     approach_from: site.approach_from,
+    preferred_farm_id: resolvePreferredFarmId(pickup.businessName, site.preferred_farm),
     start_date: pickup.startDate,
     is_first_visit: pickup.isFirstVisit,
     manual_lat: override.lat,
@@ -513,6 +543,22 @@ function generateClientId(businessName: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
+}
+
+/**
+ * The farm a single-farm day finishes at: the closed (assigned_only) farm if any
+ * of today's customers go there, else whichever farm they go to. Two-farm days
+ * are split into per-farm runs on the route screen; this is just run 1's farm.
+ */
+function dayFarmId(pickups: SheetPickup[]): string {
+  const ids = new Set<string>();
+  for (const p of pickups) {
+    const site = getSiteInfoFor(p.businessName);
+    const id = farmForClient({ preferred_farm_id: resolvePreferredFarmId(p.businessName, site.preferred_farm) } as Client);
+    if (id) ids.add(id);
+  }
+  const list = [...ids];
+  return list.find(isLockedFarm) ?? list[0] ?? '1';
 }
 
 /**
@@ -534,7 +580,7 @@ export function transformToRoute(pickups: SheetPickup[], date: Date): Route {
     collector_id: '',
     stops,
     start_location: '28 Brooklands Park Drive, New Plymouth',
-    destination_farm_id: '1',
+    destination_farm_id: dayFarmId(pickups),
     created_at: new Date().toISOString()
   };
 }
@@ -629,6 +675,7 @@ export function getAllClients(): Client[] {
       find_instructions: site.instructions,
       find_media: site.media,
       approach_from: site.approach_from,
+      preferred_farm_id: resolvePreferredFarmId(row.businessName, site.preferred_farm),
       manual_lat: row.manualLat,
       manual_lng: row.manualLng,
     };

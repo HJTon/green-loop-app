@@ -6,7 +6,8 @@
     "contact_phone": "",
     "address": "274 Korito Road, New Plymouth",
     "delivery_notes": "",
-    "active": true
+    "active": true,
+    "assigned_only": true
   },
   {
     "id": "2",

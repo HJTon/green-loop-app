@@ -16,11 +16,14 @@ import {
   writeBinCount,
   writePickupNote,
   writeSiteInfo,
+  writePreferredFarm,
   writeManualOverride,
   isProduction,
 } from '@/services/sheetDataService';
 import { sendReportEmail } from '@/services/emailService';
 import { apiFetch } from '@/utils/apiClient';
+import { getFarmById } from '@/utils/data';
+import { resolvePreferredFarmId } from '@/utils/farmAssignment';
 import {
   getSession,
   saveSession,
@@ -169,6 +172,9 @@ interface AppContextType {
 
   // "How to find the bins" + approach note per-site help (editable in the field)
   saveSiteInfo: (clientId: string, data: { instructions: string; media: string[]; approach_from: string }) => Promise<void>;
+  // Set a business's usual farm (farm id, or '' to fall back to the default
+  // list). Persists to Site Info col E.
+  savePreferredFarm: (businessName: string, farmId: string) => Promise<void>;
   // Manual lat/lng override for stops the geocoder can't place. Pass null/null
   // to clear an existing override. Persists to columns N/O on the sheet.
   saveClientLocationOverride: (clientId: string, lat: number | null, lng: number | null) => Promise<void>;
@@ -924,6 +930,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [sheetClients, addToast]);
 
+  const savePreferredFarm = useCallback(async (businessName: string, farmId: string) => {
+    const farm = farmId ? getFarmById(farmId) : undefined;
+    const key = businessName.trim().toLowerCase();
+    setSheetClients(prev => prev.map(c =>
+      c.business_name.trim().toLowerCase() === key
+        ? { ...c, preferred_farm_id: farmId ? farmId : resolvePreferredFarmId(c.business_name) }
+        : c
+    ));
+    try {
+      await writePreferredFarm(businessName, farm?.farm_name ?? '');
+      addToast('success', farm ? `${businessName} → ${farm.farm_name}` : `${businessName}: back to default farm`);
+    } catch (error) {
+      console.error('Failed to save preferred farm:', error);
+      addToast('error', "Couldn't save the farm to the sheet");
+    }
+  }, [addToast]);
+
   // Add a brand-new location that isn't in the schedule sheet. It's recorded to
   // the Pickup Notes tab at completion (not the invoicing grid), and stored in
   // full locally so it survives a reload. Returns the synthetic client id.
@@ -1266,6 +1289,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         addNewLocationStop: addNewLocationStopFn,
         removeAdHocStopFromRoute,
         saveSiteInfo,
+        savePreferredFarm,
         saveClientLocationOverride,
         queueNoteWrite,
         queueEmailSend,

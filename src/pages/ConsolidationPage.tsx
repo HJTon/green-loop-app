@@ -6,7 +6,7 @@ import { Button } from '@/components/Button';
 import { ConsolidationBoard } from '@/components/consolidation/ConsolidationBoard';
 import { ConsolidationProgress } from '@/components/consolidation/ConsolidationProgress';
 import { useApp } from '@/contexts/AppContext';
-import { resolveDestinationFarm } from '@/utils/data';
+import { resolveDestinationFarm, getFarmById } from '@/utils/data';
 import type { ConsolidationSession } from '@/types';
 import {
   createPickupTilesFromPickups,
@@ -110,7 +110,7 @@ export function ConsolidationPage() {
         const ok = await queueMaturingBinWrite({
           bin,
           collectorName: collector.name,
-          farmName: farm?.farm_name || 'Unknown Farm',
+          farmName: getFarmById(bin.farmId)?.farm_name ?? farm?.farm_name ?? 'Unknown Farm',
         });
         if (ok) sentCount++; else queuedCount++;
       }

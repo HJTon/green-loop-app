@@ -1,0 +1,29 @@
+{
+  "_source": "Caroline's processing split, sent by Mieke 2026-11-23. Keys are business names as on the invoicing tab (matched case-insensitively). A 'Preferred Farm' entry in the Site Info tab (col E) overrides these.",
+  "assignments": {
+    "Altherm": "Eudaimonia",
+    "Columbus Coffee": "Eudaimonia",
+    "Novotel New Plymouth": "Eudaimonia",
+    "TOI Foundation": "Eudaimonia",
+    "NP Community Foodbank Trust": "Eudaimonia",
+    "Juno Gin": "Eudaimonia",
+    "Life Skills": "Eudaimonia",
+    "Venture Taranaki": "Eudaimonia",
+    "New Plymouth Top 10 Holiday Park": "Eudaimonia",
+    "TSB Bank Ltd - Call Centre and Branch": "Eudaimonia",
+    "Clelands Construction": "Eudaimonia",
+    "Mitre 10 St Aubyn St": "Eudaimonia",
+    "Quails Nest Eatery": "Eudaimonia",
+    "Taranaki Iwi, L4 Ngāmotu House": "Eudaimonia",
+    "Molly Ryan Arvida": "Kahu Glen",
+    "Millennium Hotel New Plymouth": "Kahu Glen",
+    "Envirohub": "Kahu Glen",
+    "Southern Cross New Plymouth Hospital": "Kahu Glen",
+    "Butlers Reef": "Kahu Glen",
+    "Plymouth International Hotel": "Kahu Glen",
+    "Auto Lodge Motel New Plymouth": "Kahu Glen",
+    "The Junction Zero Waste Hub": "Kahu Glen",
+    "Mikes Brewery": "Kahu Glen",
+    "Incafe": "Kahu Glen"
+  }
+}

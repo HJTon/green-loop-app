@@ -18,6 +18,7 @@ import {
 } from '@/utils/routeOptimiser';
 import { suggestSplit, type SplitStop, type SplitSuggestion, type RunPlan } from '@/utils/routeSplit';
 import { binLoad, BIN_CAPACITY } from '@/utils/vanLoad';
+import { farmStartId } from '@/utils/farmAssignment';
 import { ensureGeocoded } from '@/utils/geocodeCache';
 import { fetchRoadMatrix, getCachedMatrix, type RoadMatrix, type Coord } from '@/utils/roadMatrix';
 
@@ -129,6 +130,9 @@ export function useRouteSplit({
       const c = getFarmCoordinates(f.id);
       if (!c) continue;
       fIdx.set(f.id, pts.length);
+      // A farm can also be a run's start ("farm:<id>") — run 2 of a farm-split
+      // day sets off from where run 1 dropped. Same matrix point.
+      sIdx.set(farmStartId(f.id), pts.length);
       pts.push(c);
     }
     return { points: pts, stopIdx: stIdx, startIdx: sIdx, farmIdx: fIdx };

@@ -4,6 +4,7 @@ import { Smartphone, Download, Share, Plus, CheckCircle2, Info, RefreshCw, Gift,
 import { Header } from '@/components/Header';
 import { Button } from '@/components/Button';
 import { useApp } from '@/contexts/AppContext';
+import { CustomerFarmsSection } from '@/components/CustomerFarmsSection';
 import {
   getWelcomeKitItems,
   saveWelcomeKitItems,
@@ -304,6 +305,9 @@ export function SettingsPage() {
             </div>
           </div>
         </section>
+
+        {/* Which farm each customer goes to — drives the split-by-farm routing */}
+        <CustomerFarmsSection />
 
         {/* Impact reports — each business's diversion + emissions page */}
         <section className="bg-white rounded-xl border border-gray-200 overflow-hidden">

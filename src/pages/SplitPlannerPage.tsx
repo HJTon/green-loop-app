@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Truck, Package, ShoppingBag, Sprout, AlertCircle, ArrowRight, ArrowLeft,
-  Loader2, Sparkles, CheckCircle2, Flag,
+  Loader2, Sparkles, CheckCircle2, Flag, Lock, Tractor,
 } from 'lucide-react';
 import { Header } from '@/components/Header';
 import { Button } from '@/components/Button';
@@ -15,6 +15,7 @@ import {
   getActiveFarmsWithCoords,
 } from '@/utils/routeOptimiser';
 import type { Client, RunEndpoints } from '@/types';
+import { planFarmSplit, farmForClient, farmStartId, isLockedFarm } from '@/utils/farmAssignment';
 
 function formatDuration(seconds: number): string {
   const totalMin = Math.round(seconds / 60);
@@ -40,8 +41,16 @@ export function SplitPlannerPage() {
     addToast,
   } = useApp();
 
-  const startOptions = useMemo(() => getActiveStartLocationsWithCoords(), []);
   const farmOptions = useMemo(() => getActiveFarmsWithCoords(), []);
+  // Starts: the depot(s), plus each farm — run 2 of a farm-split day sets off
+  // from the farm run 1 dropped at.
+  const startOptions = useMemo(
+    () => [
+      ...getActiveStartLocationsWithCoords().map(s => ({ id: s.id, name: s.name, address: s.address })),
+      ...farmOptions.map(f => ({ id: farmStartId(f.id), name: `${f.farm_name} (after drop-off)`, address: f.address })),
+    ],
+    [farmOptions]
+  );
 
   const split = useRouteSplit({
     stops: route?.stops ?? [],
@@ -56,11 +65,17 @@ export function SplitPlannerPage() {
       : farmOptions[0]?.id ?? '';
   const defaultStart = startOptions[0]?.id ?? '';
 
+  // Per-farm split for today, when customers go to more than one farm.
+  const farmPlan = useMemo(
+    () => (route ? planFarmSplit(route.stops, getClientById, defaultStart) : null),
+    [route, getClientById, defaultStart]
+  );
+
   const [run1Endpoints, setRun1Endpoints] = useState<RunEndpoints>(
-    splitState?.run1 ?? { startId: defaultStart, finishId: defaultFinish }
+    splitState?.run1 ?? farmPlan?.run1 ?? { startId: defaultStart, finishId: defaultFinish }
   );
   const [run2Endpoints, setRun2Endpoints] = useState<RunEndpoints>(
-    splitState?.run2 ?? { startId: defaultStart, finishId: defaultFinish }
+    splitState?.run2 ?? farmPlan?.run2 ?? { startId: defaultStart, finishId: defaultFinish }
   );
   const [firstRun, setFirstRun] = useState<RunNo>(splitState?.firstRun ?? 1);
 
@@ -82,6 +97,19 @@ export function SplitPlannerPage() {
         next[l.id] = (stop?.run ?? 1) as RunNo;
       }
       setAssignment(next);
+      // The route/split may have loaded after first render (direct page load),
+      // leaving the pickers on defaults — sync them to the saved split.
+      setRun1Endpoints(splitState.run1);
+      setRun2Endpoints(splitState.run2);
+      setFirstRun(splitState.firstRun);
+      seededRef.current = true;
+      return;
+    }
+
+    if (farmPlan) {
+      setRun1Endpoints(farmPlan.run1);
+      setRun2Endpoints(farmPlan.run2);
+      setAssignment(assignmentFromFarmPlan());
       seededRef.current = true;
       return;
     }
@@ -98,7 +126,17 @@ export function SplitPlannerPage() {
     if (!suggestion.feasible) {
       addToast('error', "Couldn't fit a full van under the limit — adjust the split by hand");
     }
-  }, [split, splitState, route, run1Endpoints, run2Endpoints, addToast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [split, splitState, route, run1Endpoints, run2Endpoints, addToast, farmPlan]);
+
+  function assignmentFromFarmPlan(): Record<string, RunNo> {
+    const next: Record<string, RunNo> = {};
+    if (!farmPlan) return next;
+    farmPlan.run1Ids.forEach(id => (next[id] = 1));
+    farmPlan.run2Ids.forEach(id => (next[id] = 2));
+    for (const l of split.located) if (next[l.id] == null) next[l.id] = 1;
+    return next;
+  }
 
   const run1Ids = useMemo(
     () => split.located.filter(l => assignment[l.id] === 1).map(l => l.id),
@@ -144,6 +182,15 @@ export function SplitPlannerPage() {
     addToast('success', 'Suggested a balanced split');
   };
 
+  const splitByFarm = () => {
+    if (!farmPlan) return;
+    setRun1Endpoints(farmPlan.run1);
+    setRun2Endpoints(farmPlan.run2);
+    setFirstRun(1);
+    setAssignment(assignmentFromFarmPlan());
+    addToast('success', 'Split by farm');
+  };
+
   const handleConfirm = () => {
     if (run1Ids.length === 0 || run2Ids.length === 0) {
       addToast('error', 'Each run needs at least one stop');
@@ -176,12 +223,24 @@ export function SplitPlannerPage() {
               <Truck size={20} />
             </div>
             <div>
-              <h2 className="font-semibold text-gray-900">Too big for one van</h2>
-              <p className="text-sm text-gray-600 mt-0.5">
-                {split.totalBins} bins today — a van holds {BIN_CAPACITY}. We've suggested a full
-                run and a lighter one. Move stops between runs if you'd like, then pick which to do
-                first.
-              </p>
+              {farmPlan ? (
+                <>
+                  <h2 className="font-semibold text-gray-900">Two farms today</h2>
+                  <p className="text-sm text-gray-600 mt-0.5">
+                    Each customer goes to their usual farm — one run per farm. Move a stop to the
+                    other run to change its farm for today only.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h2 className="font-semibold text-gray-900">Too big for one van</h2>
+                  <p className="text-sm text-gray-600 mt-0.5">
+                    {split.totalBins} bins today — a van holds {BIN_CAPACITY}. We've suggested a full
+                    run and a lighter one. Move stops between runs if you'd like, then pick which to do
+                    first.
+                  </p>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -229,6 +288,7 @@ export function SplitPlannerPage() {
             farmOptions={farmOptions}
             getClientById={getClientById}
             onMove={id => moveStop(id, 2)}
+            multiFarm={run1Endpoints.finishId !== run2Endpoints.finishId}
           />
           <RunColumn
             runNo={2}
@@ -242,9 +302,16 @@ export function SplitPlannerPage() {
             farmOptions={farmOptions}
             getClientById={getClientById}
             onMove={id => moveStop(id, 1)}
+            multiFarm={run1Endpoints.finishId !== run2Endpoints.finishId}
           />
         </div>
 
+        {farmPlan && (
+          <Button variant="outline" onClick={splitByFarm} className="w-full">
+            <Tractor size={18} className="mr-2" />
+            Split by farm
+          </Button>
+        )}
         <Button variant="outline" onClick={reSuggest} className="w-full">
           <Sparkles size={18} className="mr-2" />
           Suggest a balanced split
@@ -316,6 +383,8 @@ interface RunColumnProps {
   farmOptions: { id: string; farm_name: string; address: string }[];
   getClientById: (id: string) => Client | undefined;
   onMove: (id: string) => void;
+  /** Runs finish at different farms — show "today only" when a stop is off its usual farm. */
+  multiFarm: boolean;
 }
 
 function RunColumn({
@@ -330,6 +399,7 @@ function RunColumn({
   farmOptions,
   getClientById,
   onMove,
+  multiFarm,
 }: RunColumnProps) {
   const overCapacity = bins > BIN_CAPACITY;
   const full = bins === BIN_CAPACITY;
@@ -401,6 +471,9 @@ function RunColumn({
         {ids.map((id, i) => {
           const client = getClientById(id);
           if (!client) return null;
+          const usualFarmId = farmForClient(client);
+          const usualFarm = farmOptions.find(f => f.id === usualFarmId);
+          const offFarm = !!usualFarm && multiFarm && usualFarm.id !== endpoints.finishId;
           const TypeIcon =
             client.collection_type === 'bins'
               ? Package
@@ -417,6 +490,12 @@ function RunColumn({
                 <p className="text-xs text-gray-400 flex items-center gap-1">
                   <TypeIcon size={11} />
                   {client.expected_quantity || 1}x {client.collection_type}
+                  {usualFarm && (
+                    <span className={`ml-1 inline-flex items-center gap-0.5 ${offFarm ? 'text-amber-600' : 'text-gray-400'}`}>
+                      · {isLockedFarm(usualFarm.id) && <Lock size={10} />}
+                      {offFarm ? `usually ${usualFarm.farm_name} — today only` : usualFarm.farm_name}
+                    </span>
+                  )}
                 </p>
               </div>
               <button

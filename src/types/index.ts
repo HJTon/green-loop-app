@@ -7,6 +7,10 @@ export interface Farm {
   address: string;
   delivery_notes: string;
   active: boolean;
+  // Closed-feedstock farm: only customers whose preferred farm is this one go
+  // here. Eudaimonia runs feedstock trials, so its intake stays fixed; anyone
+  // without a preference goes to an open farm instead.
+  assigned_only?: boolean;
 }
 
 // Waste collection container type. 'soil' = soil/green-waste bins that are
@@ -48,6 +52,11 @@ export interface Client {
   // builds, landmark-only sites). Both are null when no override is set.
   manual_lat?: number | null;
   manual_lng?: number | null;
+  // The farm this business's food waste normally goes to (farm id). From the
+  // Site Info tab col E, else the bundled default list (farm-assignments.json).
+  // Undefined = no preference. A day's override is just moving the stop to the
+  // other run in the split planner — it never changes this.
+  preferred_farm_id?: string;
 }
 
 // Collector types

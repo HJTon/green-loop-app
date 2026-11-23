@@ -31,6 +31,8 @@ import {
   Loader2, Navigation, Sparkles, Settings, Split,
 } from 'lucide-react';
 import { useOptimalRoute } from '@/hooks/useOptimalRoute';
+import { useRouteSplit } from '@/hooks/useRouteSplit';
+import { planFarmSplit, parseFarmStartId } from '@/utils/farmAssignment';
 import {
   buildGoogleMapsUrl,
   getActiveStartLocationsWithCoords,
@@ -58,6 +60,27 @@ function loadAutoApplied(): Set<string> {
 function persistAutoApplied(set: Set<string>): void {
   try {
     localStorage.setItem(AUTO_APPLIED_KEY, JSON.stringify(Array.from(set)));
+  } catch {
+    // ignore
+  }
+}
+
+// Routes already auto-split by farm (or deliberately combined back into one
+// run) — never auto-split those again.
+const FARM_SPLIT_KEY = 'greenloop:farm-split-routes:v1';
+
+function loadFarmSplitDone(): Set<string> {
+  try {
+    const raw = localStorage.getItem(FARM_SPLIT_KEY);
+    return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function persistFarmSplitDone(set: Set<string>): void {
+  try {
+    localStorage.setItem(FARM_SPLIT_KEY, JSON.stringify(Array.from(set)));
   } catch {
     // ignore
   }
@@ -92,6 +115,7 @@ export function RouteListPage() {
     refreshData,
     addToast,
     splitState,
+    applySplit,
     setActiveRun,
     applyRunOrder,
     hasPendingMaturingBins,
@@ -200,6 +224,55 @@ export function RouteListPage() {
     })
   );
 
+  // --- Auto-split by farm ---------------------------------------------------
+  // When today's customers go to two farms, organise the day into one run per
+  // farm automatically (closed farm first, then the open farm starting from
+  // there). Once per route — "Combine to one run" in the planner sticks.
+  const farmSplitDoneRef = useRef<Set<string>>(loadFarmSplitDone());
+  const farmPlan = useMemo(() => {
+    if (!route || isReadOnlyView || splitState?.enabled) return null;
+    if (farmSplitDoneRef.current.has(route.id)) return null;
+    if (!route.stops.some(s => s.status === 'pending')) return null;
+    return planFarmSplit(route.stops, getClientById, startOptions[0]?.id ?? '');
+  }, [route, isReadOnlyView, splitState?.enabled, getClientById, startOptions]);
+
+  const farmSplitter = useRouteSplit({
+    stops: route?.stops ?? [],
+    getClientById,
+    enabled: !!farmPlan,
+  });
+
+  useEffect(() => {
+    if (!route || !farmPlan) return;
+    const st = farmSplitter.status;
+    // Wait for driving times; fall back to the sheet order if they can't load.
+    if (st === 'geocoding' || st === 'fetching') return;
+
+    const byPos = new Map(route.stops.map(s => [s.client_id, s]));
+    const order = (ids: string[], endpoints: { startId: string; finishId: string }) => {
+      const done = ids.filter(id => byPos.get(id)?.status !== 'pending');
+      const planned = (st === 'ready' ? farmSplitter.planRun(ids, endpoints)?.ids : null) ?? [];
+      const plannedSet = new Set(planned);
+      const rest = ids
+        .filter(id => byPos.get(id)?.status === 'pending' && !plannedSet.has(id))
+        .sort((a, b) => (byPos.get(a)?.position ?? 0) - (byPos.get(b)?.position ?? 0));
+      return [...done, ...planned, ...rest];
+    };
+
+    applySplit({
+      run1Ids: order(farmPlan.run1Ids, farmPlan.run1),
+      run2Ids: order(farmPlan.run2Ids, farmPlan.run2),
+      run1Endpoints: farmPlan.run1,
+      run2Endpoints: farmPlan.run2,
+      firstRun: 1,
+    });
+    farmSplitDoneRef.current.add(route.id);
+    persistFarmSplitDone(farmSplitDoneRef.current);
+    const f1 = getFarmById(farmPlan.run1.finishId)?.farm_name ?? 'farm 1';
+    const f2 = getFarmById(farmPlan.run2.finishId)?.farm_name ?? 'farm 2';
+    addToast('success', `Two farms today — Run 1 to ${f1}, then Run 2 to ${f2}`);
+  }, [route, farmPlan, farmSplitter, applySplit, addToast]);
+
   // Redirect to login if not authenticated
   useEffect(() => {
     if (!collector && !isLoading) {
@@ -242,7 +315,6 @@ export function RouteListPage() {
     return null;
   }
 
-  const destinationFarm = route.destination_farm_id ? getFarmById(route.destination_farm_id) : undefined;
   const allComplete = completedCount === totalStops;
   const sortedStops = [...route.stops].sort((a, b) => a.position - b.position);
 
@@ -255,7 +327,14 @@ export function RouteListPage() {
   // session-selected start/finish.
   const effStartId = activeEndpoints ? activeEndpoints.startId : startId;
   const effFinishId = activeEndpoints ? activeEndpoints.finishId : finishId;
-  const startLocation = startOptions.find(s => s.id === effStartId);
+  // Where this run drops: the active run's farm on a split day.
+  const destinationFarmId = activeEndpoints ? activeEndpoints.finishId : route.destination_farm_id;
+  const destinationFarm = destinationFarmId ? getFarmById(destinationFarmId) : undefined;
+  const farmStart = parseFarmStartId(effStartId);
+  const farmStartFarm = farmStart ? farmOptions.find(f => f.id === farmStart) : undefined;
+  const startLocation = farmStartFarm
+    ? { id: effStartId, name: farmStartFarm.farm_name, address: farmStartFarm.address }
+    : startOptions.find(s => s.id === effStartId);
   const finishFarm = farmOptions.find(f => f.id === effFinishId);
 
   // Stops shown on this page: only the active run when split.

@@ -7,7 +7,7 @@ import { ReportSection } from '@/components/ReportSection';
 import { ConsolidationBoard } from '@/components/consolidation/ConsolidationBoard';
 import { ConsolidationProgress } from '@/components/consolidation/ConsolidationProgress';
 import { useApp } from '@/contexts/AppContext';
-import { resolveDestinationFarm } from '@/utils/data';
+import { resolveDestinationFarm, getFarmById } from '@/utils/data';
 import {
   generateId,
   getCurrentDate,
@@ -24,12 +24,23 @@ import {
 
 export function DropOffPage() {
   const navigate = useNavigate();
-  const { collector, route, pickups, dropOff, completeDropOff, sheetClients, addToast, queueEmailSend, queueMaturingBinWrite } = useApp();
+  const { collector, route, pickups, dropOff, completeDropOff, sheetClients, addToast, queueEmailSend, queueMaturingBinWrite, splitState } = useApp();
 
-  const farm = resolveDestinationFarm(route?.destination_farm_id);
+  // On a split day each run finishes at its own farm — drop at the active run's.
+  const activeRunFinish = splitState?.enabled
+    ? (splitState.activeRun === 1 ? splitState.run1 : splitState.run2).finishId
+    : undefined;
+  const farm = resolveDestinationFarm(activeRunFinish ?? route?.destination_farm_id);
 
   // Calculate totals from today's pickups
-  const completedPickups = pickups.filter(p => p.status === 'completed');
+  // Split day: only this run's pickups — the other run drops at its own farm,
+  // so its bins must never be sorted (or re-sent to the Bin Tracker) here.
+  const runClientIds = splitState?.enabled && route
+    ? new Set(route.stops.filter(st => st.run === splitState.activeRun).map(st => st.client_id))
+    : null;
+  const completedPickups = pickups.filter(
+    p => p.status === 'completed' && (!runClientIds || runClientIds.has(p.client_id))
+  );
   const totalBins = completedPickups.reduce((sum, p) => sum + p.bins_collected, 0);
 
   // Form state
@@ -51,6 +62,25 @@ export function DropOffPage() {
         completedPickups.filter(p => !existingSession.pickupTiles.some(t => t.id.startsWith(`tile-${p.id}`))),
         sheetClients
       );
+
+      // Second drop-off of a split day: the first run's bins were already
+      // consolidated and sent to the Bin Tracker. Start a fresh session holding
+      // only the new run's pickups, so those bins aren't re-sent and the new
+      // run's food waste can't be tipped into a bin left at the other farm.
+      if (existingSession.completedAt && newPickupTiles.length > 0) {
+        const nextSession: ConsolidationSession = {
+          id: generateId(),
+          date: getCurrentDate(),
+          collectorId: collector.id,
+          pickupTiles: newPickupTiles,
+          maturingBins: [],
+          completedAt: null,
+          activeBinId: null,
+        };
+        setSession(nextSession);
+        saveConsolidation(nextSession);
+        return;
+      }
 
       if (newPickupTiles.length > 0) {
         const updatedSession = {
@@ -119,7 +149,7 @@ export function DropOffPage() {
         const ok = await queueMaturingBinWrite({
           bin,
           collectorName: collector.name,
-          farmName: farm.farm_name,
+          farmName: getFarmById(bin.farmId)?.farm_name ?? farm.farm_name,
         });
         if (ok) sentCount++; else queuedCount++;
       }
