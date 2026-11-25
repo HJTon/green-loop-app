@@ -31,6 +31,7 @@ export function exportPickupsToCSV(
     'urgency',
     'collector_name',
     'status',
+    'aborted',
   ];
 
   const rows = pickups.map(pickup => {
@@ -51,6 +52,7 @@ export function exportPickupsToCSV(
       pickup.report?.urgency || '',
       collector?.name || 'Unknown',
       pickup.status,
+      pickup.aborted ? 'yes' : '',
     ].join(',');
   });
 
@@ -73,19 +75,21 @@ export function downloadCSV(content: string, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
+// Returns true if a CSV was actually downloaded (false when there was
+// nothing to export) so callers don't claim a download happened.
 export function exportTodayData(
   pickups: PickupRecord[],
   clients: Client[],
   collectors: Collector[],
   dropOff?: DropOffRecord | null,
   farms?: Farm[]
-): void {
+): boolean {
   const today = getCurrentDate();
   const todayPickups = pickups.filter(p => p.date === today);
 
   if (todayPickups.length === 0) {
     alert('No pickups to export for today');
-    return;
+    return false;
   }
 
   let csv = exportPickupsToCSV(todayPickups, clients, collectors);
@@ -114,4 +118,5 @@ export function exportTodayData(
   const filename = `greenloop_collections_${today}.csv`;
 
   downloadCSV(csv, filename);
+  return true;
 }
