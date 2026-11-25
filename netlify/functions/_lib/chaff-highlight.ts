@@ -5,14 +5,14 @@ import type { sheets_v4 } from 'googleapis';
 // Sometimes the collector refills a client's bokashi with chaffed pickle instead of the usual
 // Zing mix. Those refills are only recorded as free text in the invoicing spreadsheet's
 // "Pickup Notes" tab ("Chaff refill", "Chaff topup", "Full not z" ...). Every bin that later
-// comes in from that client carries chaff, so its "Content from" cell for that client is shaded
-// blue on the Bin Tracker.
+// comes in from that client carries chaff, so it is highlighted on the Bin Tracker.
 //
-// Rule (agreed with Joe 2026-11-25), per client:
-//   - blue starts with bins collected AFTER a chaff refill visit (the bin taken away on the
+// Rule (agreed with Joe 2026-11-25, revised the same day), per client — a bin carries whatever
+// mix the client had in their bucket while filling it:
+//   - CP starts with bins collected AFTER a chaff refill visit (the bin taken away on the
 //     chaff visit itself was filled with the old mix);
 //   - it carries on through the visit where Zing is refilled again (that bin is still chaff),
-//     and through the first collection after it (leftover chaff), then stops;
+//     and stops there: bins collected after the Zing visit are normal;
 //   - a later chaff refill starts it again.
 //
 // Colours (changed 2026-11-25 from a blue name cell):
@@ -69,7 +69,7 @@ const key = (name: string) => name.trim().toLowerCase();
 export interface RefillEvent { day: number; client: string; kind: RefillKind }
 export interface TrackerRow { row: number; day: number | null; names: { col: number; name: string }[] }
 
-/** Returns "row:col" (0-based) for every name cell that should be blue. */
+/** Returns "row:col" (0-based) for every name cell that carries chaffed pickle. */
 export function computeChaffCells(events: RefillEvent[], rows: TrackerRow[]): Set<string> {
   const byClient = new Map<string, RefillEvent[]>();
   for (const e of events) {
@@ -79,19 +79,6 @@ export function computeChaffCells(events: RefillEvent[], rows: TrackerRow[]): Se
   }
   for (const list of byClient.values()) list.sort((a, b) => a.day - b.day);
 
-  // Every collection day per client, to find "the first collection after the Zing visit".
-  const binDays = new Map<string, number[]>();
-  for (const r of rows) {
-    if (r.day === null) continue;
-    for (const { name } of r.names) {
-      const k = key(name);
-      if (!byClient.has(k)) continue;
-      if (!binDays.has(k)) binDays.set(k, []);
-      binDays.get(k)!.push(r.day);
-    }
-  }
-  for (const d of binDays.values()) d.sort((a, b) => a - b);
-
   const isChaffBin = (k: string, day: number): boolean => {
     const evs = byClient.get(k);
     if (!evs) return false;
@@ -99,9 +86,8 @@ export function computeChaffCells(events: RefillEvent[], rows: TrackerRow[]): Se
     for (const e of evs) if (e.kind === 'chaff' && e.day < day) lastChaff = e;
     if (!lastChaff) return false;
     const zing = evs.find((e) => e.kind === 'zing' && e.day > lastChaff!.day);
-    if (!zing || zing.day >= day) return true; // still on chaff, or collected at the Zing visit
-    const firstAfterZing = binDays.get(k)?.find((d) => d > zing.day);
-    return firstAfterZing === day;
+    // Still on chaff, or this bin was collected AT the Zing visit (filled before the refill).
+    return !zing || zing.day >= day;
   };
 
   const out = new Set<string>();
