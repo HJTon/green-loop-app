@@ -15,18 +15,28 @@ import type { sheets_v4 } from 'googleapis';
 //     and through the first collection after it (leftover chaff), then stops;
 //   - a later chaff refill starts it again.
 //
-// Only the client's own name cell (B–F, or M for 6+ sources) is shaded, so the batch colours in
-// G/K are untouched and a mixed bin shows which contributor brought the chaff. Cells that are
-// shaded exactly CHAFF_BLUE but no longer qualify are reset to white, so the sync is idempotent
-// and cleans up after row inserts that inherit a fill.
+// Colours (changed 2026-11-25 from a blue name cell):
+//   - the chaff client's own name cell (B–F, or M for 6+ sources) is CP_BRIGHT yellow;
+//   - every other cell of that row, A–O, is CP_LIGHT yellow.
+// Only cells that are white/unfilled or already one of OUR colours are painted, so the batch
+// colours in G/K and anything highlighted by hand are never overwritten. Cells in one of our
+// colours that no longer qualify are reset to white, so the sync is idempotent and cleans up after
+// row inserts that inherit a fill.
+//
+// The compost monitor's bin scanner reads CP_BRIGHT name cells to say "contains some CP" — keep
+// compost-monitor/netlify/functions/compost-sheets-read.ts in step if these values change. They
+// are deliberately not stock palette yellows (#ffff00 / #fff2cc are already used by hand).
 
-export const CHAFF_BLUE = { red: 0x9f / 255, green: 0xc5 / 255, blue: 0xe8 / 255 }; // #9fc5e8
+export const CP_BRIGHT = { red: 0xff / 255, green: 0xe6 / 255, blue: 0x00 / 255 }; // #ffe600
+export const CP_LIGHT = { red: 0xff / 255, green: 0xf6 / 255, blue: 0xc2 / 255 }; // #fff6c2
+const LEGACY_BLUE = { red: 0x9f / 255, green: 0xc5 / 255, blue: 0xe8 / 255 }; // #9fc5e8, first version
 const WHITE = { red: 1, green: 1, blue: 1 };
 
 const PICKUP_NOTES_TAB = 'Pickup Notes';
 const BIN_TRACKER_TAB = 'Bin Tracker';
 // 0-based columns on Bin Tracker holding source names: B–F and M ("Content from 6+").
 const NAME_COLS = [1, 2, 3, 4, 5, 12];
+const ROW_COLS = 15; // A–O
 
 export type RefillKind = 'chaff' | 'zing';
 
@@ -102,16 +112,30 @@ export function computeChaffCells(events: RefillEvent[], rows: TrackerRow[]): Se
   return out;
 }
 
-const close = (a: number | null | undefined, b: number) => Math.abs((a ?? 0) - b) < 0.01;
-const isChaffBlue = (c?: sheets_v4.Schema$Color | null) =>
-  !!c && close(c.red, CHAFF_BLUE.red) && close(c.green, CHAFF_BLUE.green) && close(c.blue, CHAFF_BLUE.blue);
+// Exact match to 1/255 — our yellows sit close to hand-used ones (#fff2cc), so be strict.
+const close = (a: number | null | undefined, b: number) => Math.abs((a ?? 0) - b) < 0.003;
+const same = (c: sheets_v4.Schema$Color | null | undefined, ref: { red: number; green: number; blue: number }) =>
+  !!c && close(c.red, ref.red) && close(c.green, ref.green) && close(c.blue, ref.blue);
+// No backgroundColor at all = unfilled. (An empty object is black: the API omits zero channels.)
+const isWhite = (c?: sheets_v4.Schema$Color | null) => !c || same(c, WHITE);
+
+type Paint = 'bright' | 'light' | 'none';
+const COLOURS: Record<Paint, { red: number; green: number; blue: number }> = { bright: CP_BRIGHT, light: CP_LIGHT, none: WHITE };
+function currentPaint(c?: sheets_v4.Schema$Color | null): Paint | 'ours-legacy' | 'foreign' {
+  if (same(c, CP_BRIGHT)) return 'bright';
+  if (same(c, CP_LIGHT)) return 'light';
+  if (same(c, LEGACY_BLUE)) return 'ours-legacy';
+  return isWhite(c) ? 'none' : 'foreign';
+}
 
 export interface ChaffSyncResult {
   chaffEvents: number;
   zingEvents: number;
-  highlighted: { row: number; name: string; date: string }[]; // newly shaded (1-based row)
-  cleared: { row: number; name: string }[];
-  totalBlue: number;
+  cpRows: number; // rows that carry chaff
+  cpCells: number; // bright-yellow name cells
+  highlighted: { row: number; name: string; date: string }[]; // name cells newly made bright (1-based row)
+  cellsPainted: number; // every cell changed this run, incl. light row fill and clears
+  cleared: number; // cells reset to white
 }
 
 /** Recomputes the chaff highlights on the Bin Tracker and applies only the differences. */
@@ -130,7 +154,7 @@ export async function syncChaffHighlights(sheets: sheets_v4.Sheets, dryRun = fal
 
   const res = await sheets.spreadsheets.get({
     spreadsheetId: maturingId,
-    ranges: [`'${BIN_TRACKER_TAB}'!A1:M`],
+    ranges: [`'${BIN_TRACKER_TAB}'!A1:O`],
     fields: 'sheets(properties(sheetId),data(rowData(values(formattedValue,effectiveFormat(backgroundColor)))))',
   });
   const sheet = res.data.sheets?.[0];
@@ -148,36 +172,42 @@ export async function syncChaffHighlights(sheets: sheets_v4.Sheets, dryRun = fal
   });
 
   const want = computeChaffCells(events, rows);
+  const cpRowSet = new Set([...want].map((k) => Number(k.split(':')[0])));
   const result: ChaffSyncResult = {
     chaffEvents: events.filter((e) => e.kind === 'chaff').length,
     zingEvents: events.filter((e) => e.kind === 'zing').length,
+    cpRows: cpRowSet.size,
+    cpCells: want.size,
     highlighted: [],
-    cleared: [],
-    totalBlue: want.size,
+    cellsPainted: 0,
+    cleared: 0,
   };
   const requests: sheets_v4.Schema$Request[] = [];
-  const paint = (row: number, col: number, color: sheets_v4.Schema$Color) =>
+  const paint = (row: number, col: number, p: Paint) => {
+    result.cellsPainted++;
+    if (p === 'none') result.cleared++;
     requests.push({
       repeatCell: {
         range: { sheetId: tabId, startRowIndex: row, endRowIndex: row + 1, startColumnIndex: col, endColumnIndex: col + 1 },
-        cell: { userEnteredFormat: { backgroundColor: color } },
+        cell: { userEnteredFormat: { backgroundColor: COLOURS[p] } },
         fields: 'userEnteredFormat.backgroundColor',
       },
     });
+  };
 
   rowData.forEach((rd, row) => {
     if (row === 0) return;
     const v = rd.values ?? [];
-    for (const col of NAME_COLS) {
+    const isCpRow = cpRowSet.has(row);
+    for (let col = 0; col < ROW_COLS; col++) {
       const cell = v[col];
-      const blue = isChaffBlue(cell?.effectiveFormat?.backgroundColor);
-      const should = want.has(`${row}:${col}`);
-      if (should && !blue) {
-        paint(row, col, CHAFF_BLUE);
+      const now = currentPaint(cell?.effectiveFormat?.backgroundColor);
+      if (now === 'foreign') continue; // batch colour or a hand highlight: never touch
+      const target: Paint = want.has(`${row}:${col}`) ? 'bright' : isCpRow ? 'light' : 'none';
+      if (now === target) continue;
+      paint(row, col, target);
+      if (target === 'bright') {
         result.highlighted.push({ row: row + 1, name: cell?.formattedValue ?? '', date: v[0]?.formattedValue ?? '' });
-      } else if (!should && blue) {
-        paint(row, col, WHITE);
-        result.cleared.push({ row: row + 1, name: cell?.formattedValue ?? '' });
       }
     }
   });

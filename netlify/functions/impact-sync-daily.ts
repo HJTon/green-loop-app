@@ -16,7 +16,7 @@ export default async () => {
   }
   try {
     const chaff = await syncChaffHighlights(getSheetsClient());
-    console.log(`impact-sync-daily: chaff highlights +${chaff.highlighted.length} -${chaff.cleared.length} (${chaff.totalBlue} blue)`);
+    console.log(`impact-sync-daily: chaff highlights ${chaff.cellsPainted} cells changed (${chaff.cpRows} CP rows, ${chaff.cpCells} CP name cells)`);
   } catch (e) {
     console.error('impact-sync-daily: chaff highlight sync failed', e);
   }
