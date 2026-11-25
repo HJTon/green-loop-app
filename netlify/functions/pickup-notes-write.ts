@@ -1,6 +1,7 @@
 import type { Context } from '@netlify/functions';
 import { google } from 'googleapis';
 import { checkAuth, corsHeaders, preflightResponse } from './_lib/auth';
+import { classifyRefillNote, syncChaffHighlights } from './_lib/chaff-highlight';
 
 const SHEET_NAME = 'Pickup Notes';
 const HEADERS = ['Date', 'Time', 'Client', 'Collector', 'Status', 'Bins Collected', 'Notes'];
@@ -95,6 +96,15 @@ export default async (request: Request, context: Context) => {
       insertDataOption: 'INSERT_ROWS',
       requestBody: { values: [row] },
     });
+
+    // A chaff or Zing refill changes which Bin Tracker bins are shaded blue.
+    if (classifyRefillNote(String(notes ?? ''))) {
+      try {
+        await syncChaffHighlights(sheets);
+      } catch (e) {
+        console.error('chaff highlight sync failed (note still written):', e);
+      }
+    }
 
     return new Response(JSON.stringify({ success: true, message: `Note recorded for ${businessName}` }), {
       status: 200,

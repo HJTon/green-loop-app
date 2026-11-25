@@ -1,6 +1,7 @@
 import type { Context } from '@netlify/functions';
 import { google } from 'googleapis';
 import { checkAuth, corsHeaders, preflightResponse } from './_lib/auth';
+import { syncChaffHighlights } from './_lib/chaff-highlight';
 
 interface MaturingBinContent {
   id: string;
@@ -284,6 +285,14 @@ export default async (request: Request, context: Context) => {
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [rowData] },
     });
+
+    // Shade this bin's chaff contributors blue (and undo any fill the inserted row inherited).
+    // Never fails the write — the daily job re-runs the same sync.
+    try {
+      await syncChaffHighlights(sheets);
+    } catch (e) {
+      console.error('chaff highlight sync failed (bin still written):', e);
+    }
 
     return new Response(JSON.stringify({
       success: true,
